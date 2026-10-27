@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en" data-theme="noir">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Garden Clock — a living clock</title>
+    <meta
+      name="description"
+      content="A full-screen live clock whose digits sit inside a procedurally grown garden of vines and roses that reacts to real weather and local time."
+    />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://api.open-meteo.com" />
+    <link rel="preconnect" href="https://timeapi.io" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@100;200;300;400;500&display=swap"
+    />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Garden Clock — a living clock" />
+    <meta
+      property="og:description"
+      content="A live clock wrapped in royal-blue vines and red spiral roses, growing with the real weather."
+    />
+    <meta property="og:image" content="%BASE_URL%og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Garden Clock: a white clock surrounded by blue vines and red roses." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Garden Clock — a living clock" />
+    <meta
+      name="twitter:description"
+      content="A live clock wrapped in a procedural garden that reacts to real weather and local time."
+    />
+    <meta name="twitter:image" content="%BASE_URL%og.png" />
+    <meta name="twitter:image:alt" content="Garden Clock: a white clock surrounded by blue vines and red roses." />
+
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#city">Skip to controls</a>
+
+    <main id="stage" aria-label="Garden Clock scene">
+      <canvas id="garden" aria-hidden="true"></canvas>
+      <canvas id="fx" aria-hidden="true"></canvas>
+      <div class="sheen" aria-hidden="true"></div>
+
+      <header id="clock">
+        <h1 class="visually-hidden">Garden Clock</h1>
+        <div id="time" role="timer" aria-live="off" aria-label="Current time">
+          <span id="hh">--</span><span id="colon" aria-hidden="true">:</span
+          ><span id="mm">--</span><span id="ss">--</span><span id="meridiem"></span>
+        </div>
+        <p id="clock-meta">
+          <span id="date"></span>
+          <span id="tz" aria-hidden="true"></span>
+        </p>
+      </header>
+
+      <aside id="weather" aria-label="Local weather">
+        <div id="w-temp">--°</div>
+        <p id="w-desc">Loading weather…</p>
+        <p id="w-meta"></p>
+        <p id="w-stale" hidden></p>
+        <p id="sim-badge" hidden></p>
+        <button id="w-retry" type="button" hidden>Retry weather</button>
+      </aside>
+
+      <div id="debug" aria-hidden="true" hidden></div>
+    </main>
+
+    <nav id="controls" aria-label="Garden clock controls">
+      <form id="city-form" role="search" autocomplete="off">
+        <label class="visually-hidden" for="city">Search city</label>
+        <input
+          id="city"
+          name="city"
+          type="search"
+          placeholder="City…"
+          autocomplete="off"
+          spellcheck="false"
+          enterkeyhint="search"
+        />
+        <datalist id="city-list"></datalist>
+        <button
+          id="locate"
+          class="icon-button"
+          type="button"
+          title="Use my location"
+          aria-label="Use my location"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="3.2" />
+            <circle cx="12" cy="12" r="7.4" />
+            <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
+          </svg>
+        </button>
+        <button class="icon-button" type="submit" title="Search city" aria-label="Search city">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="10.8" cy="10.8" r="6.8" />
+            <path d="m16 16 5 5" />
+          </svg>
+        </button>
+      </form>
+
+      <label class="field">
+        <span>Theme</span>
+        <select id="theme" title="Choose a theme"></select>
+      </label>
+
+      <label class="field">
+        <span>Weather</span>
+        <select id="sim" title="Preview a weather condition">
+          <option value="">Live</option>
+          <option value="clear">Clear</option>
+          <option value="cloud">Cloudy</option>
+          <option value="fog">Fog</option>
+          <option value="rain">Rain</option>
+          <option value="storm">Thunderstorm</option>
+          <option value="snow">Snow</option>
+        </select>
+      </label>
+
+      <label class="toggle">
+        <input type="checkbox" id="h12" />
+        <span>12h</span>
+      </label>
+
+      <label class="toggle">
+        <input type="checkbox" id="secs" checked />
+        <span>sec</span>
+      </label>
+
+      <button id="regrow" class="text-button" type="button" title="Grow a new garden (R)">
+        Regrow
+      </button>
+
+      <button
+        id="share"
+        class="icon-button"
+        type="button"
+        title="Copy a link to this garden"
+        aria-label="Copy a link to this garden"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="6" cy="12" r="2.6" />
+          <circle cx="18" cy="5.5" r="2.6" />
+          <circle cx="18" cy="18.5" r="2.6" />
+          <path d="m8.3 10.7 7.4-3.9M8.3 13.3l7.4 3.9" />
+        </svg>
+      </button>
+
+      <button
+        id="save"
+        class="icon-button"
+        type="button"
+        title="Save this garden as a PNG"
+        aria-label="Save this garden as a PNG"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3v12M7.5 10.5 12 15l4.5-4.5" />
+          <path d="M4 17.5v2A1.5 1.5 0 0 0 5.5 21h13a1.5 1.5 0 0 0 1.5-1.5v-2" />
+        </svg>
+      </button>
+
+      <button
+        id="fullscreen"
+        class="icon-button"
+        type="button"
+        title="Toggle full screen (F)"
+        aria-label="Toggle full screen"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+        </svg>
+      </button>
+
+      <span id="sync" role="status" aria-live="polite">syncing…</span>
+      <span id="hint" aria-hidden="true">F full screen · H hide</span>
+    </nav>
+
+    <p class="visually-hidden">
+      Keyboard shortcuts: F toggles full screen, H hides or shows the controls, R grows a new
+      garden. The clock is decorative and does not announce every second.
+    </p>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+
+    <noscript>
+      <div class="noscript">Garden Clock needs JavaScript to grow its garden and read the time.</div>
+    </noscript>
+
+    <script type="module" src="/js/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,17 @@
+.git
+.github
+.husky
+node_modules
+dist
+coverage
+playwright-report
+test-results
+tests
+docs
+Project.md
+README.md
+CHANGELOG.md
+*.log
+.env
+.env.*
+!.env.example
