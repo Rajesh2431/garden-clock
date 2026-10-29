@@ -42,32 +42,32 @@ The production build is written to `dist/`.
 
 ## Scripts
 
-| Command                 | Purpose                                                         |
-| ----------------------- | --------------------------------------------------------------- |
-| `npm run dev`           | Start the Vite development server                               |
-| `npm run build`         | Build the production site and service worker                    |
-| `npm run preview`       | Serve the production build locally                              |
-| `npm test`              | Run the Vitest unit tests                                       |
-| `npm run test:watch`    | Run unit tests in watch mode                                    |
-| `npm run e2e`           | Build, preview and run the Playwright browser tests             |
-| `npm run lint`          | Run ESLint                                                      |
-| `npm run lint:fix`      | Run ESLint with automatic fixes                                 |
-| `npm run format`        | Format the repository with Prettier                             |
-| `npm run format:check`  | Check formatting without writing files                          |
-| `npm run assets`        | Regenerate the PNG icons from `scripts/art/icon.svg`            |
-| `npm run og`            | Capture a real browser screenshot and write `public/og.png`     |
+| Command                | Purpose                                                     |
+| ---------------------- | ----------------------------------------------------------- |
+| `npm run dev`          | Start the Vite development server                           |
+| `npm run build`        | Build the production site and service worker                |
+| `npm run preview`      | Serve the production build locally                          |
+| `npm test`             | Run the Vitest unit tests                                   |
+| `npm run test:watch`   | Run unit tests in watch mode                                |
+| `npm run e2e`          | Build, preview and run the Playwright browser tests         |
+| `npm run lint`         | Run ESLint                                                  |
+| `npm run lint:fix`     | Run ESLint with automatic fixes                             |
+| `npm run format`       | Format the repository with Prettier                         |
+| `npm run format:check` | Check formatting without writing files                      |
+| `npm run assets`       | Regenerate the PNG icons from `scripts/art/icon.svg`        |
+| `npm run og`           | Capture a real browser screenshot and write `public/og.png` |
 
 `npm run assets` needs `rsvg-convert` and ImageMagick's `magick`. `npm run og` and
 `npm run e2e` need Playwright's Chromium (`npx playwright install chromium`).
 
 ## URL parameters
 
-| Parameter    | Effect                                                                 |
-| ------------ | ---------------------------------------------------------------------- |
-| `?seed=1234` | Reproduce a specific garden. Seeds are positive 32-bit integers.        |
-| `?regrow=1`  | Generate a new seed on load, then remove this parameter from the URL.   |
-| `?kiosk=1`   | Hide the controls on load. Press `H` to show them again.                |
-| `?debug=1`   | Show frame timing, seed, weather kind and particle counts.              |
+| Parameter    | Effect                                                                |
+| ------------ | --------------------------------------------------------------------- |
+| `?seed=1234` | Reproduce a specific garden. Seeds are positive 32-bit integers.      |
+| `?regrow=1`  | Generate a new seed on load, then remove this parameter from the URL. |
+| `?kiosk=1`   | Hide the controls on load. Press `H` to show them again.              |
+| `?debug=1`   | Show frame timing, seed, weather kind and particle counts.            |
 
 The current seed is written back to the URL when a garden is regrown or shared.
 
@@ -84,7 +84,8 @@ offset = serverTime + roundTrip / 2 - localTime
 ```
 
 Three samples are taken and the lowest-round-trip sample wins. The clock resyncs every ten
-minutes, and on tab focus or when the browser comes back online. Time sources, in order:
+minutes, after a tab has been hidden longer than the interval, and when the browser comes back
+online. Time sources, in order:
 
 1. `timeapi.io` - UTC timestamp with a zoneless `dateTime` field, treated as UTC.
 2. `https://cloudflare.com/cdn-cgi/trace` - the `ts` field, in seconds, parsed as UTC.
@@ -118,7 +119,8 @@ resize and after web fonts load.
 
 `js/themes.js` contains six palettes and the Auto rules. Theme changes write CSS custom
 properties, update the meta theme colour and rebuild the canvas. Digits are checked against
-their background at 4.5:1 or better.
+their background at 4.5:1 or better. A first visit starts on Auto; choose Noir Roses for the
+black, blue and red reference look.
 
 `js/fx.js` draws a separate canvas above the garden. Particle counts are capped at 340 and
 halved on low-core devices. Reduced motion lowers the counts further, removes butterflies,
@@ -136,9 +138,9 @@ garden.
 
 All configuration is optional. Copy `.env.example` to `.env` if needed.
 
-| Variable                  | Purpose                                                                 |
-| ------------------------- | ----------------------------------------------------------------------- |
-| `VITE_BASE`               | Vite base path. Use `/repo-name/` for a GitHub Pages project site.       |
+| Variable                  | Purpose                                                                   |
+| ------------------------- | ------------------------------------------------------------------------- |
+| `VITE_BASE`               | Vite base path. Use `/repo-name/` for a GitHub Pages project site.        |
 | `VITE_ANALYTICS_ENDPOINT` | Optional analytics collector. Sends theme/weather events, no coordinates. |
 | `VITE_ERROR_ENDPOINT`     | Optional error collector. Sends message, source, line and stack.          |
 
@@ -225,6 +227,13 @@ tests/unit/                Vitest suites
 tests/e2e/                 Playwright suite
 docs/                      design, research, deployment and acceptance notes
 ```
+
+Further documentation:
+
+- [Design notes](docs/DESIGN.md)
+- [Research and API decisions](docs/RESEARCH.md)
+- [Deployment guide](docs/DEPLOY.md)
+- [Acceptance record](docs/ACCEPTANCE.md)
 
 ## Accessibility and performance
 

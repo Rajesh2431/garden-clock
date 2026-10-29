@@ -37,21 +37,21 @@ rim, soft caustics and a translucent sheen over the flower colours.
 
 Design tokens are CSS custom properties set by `applyTheme`:
 
-| Token         | Purpose                                         |
-| ------------- | ----------------------------------------------- |
-| `--bg`        | Page background                                 |
-| `--stage-bg`  | Canvas-stage background                         |
-| `--digit`     | Clock digits                                    |
-| `--glow`      | Optional digit glow                             |
-| `--ui`        | Primary UI text                                 |
-| `--muted`     | Secondary text                                  |
-| `--panel`     | Control and weather panel fill                  |
-| `--border`    | Panel border                                    |
-| `--accent`    | Focus rings, links, small accents               |
-| `--rose`      | Decorative accent                               |
-| `--inset`     | Stage inset (used by the glass marble)           |
-| `--radius`    | Stage corner radius (used by the glass marble)   |
-| `--font`      | Outfit with system-ui fallback                  |
+| Token        | Purpose                                        |
+| ------------ | ---------------------------------------------- |
+| `--bg`       | Page background                                |
+| `--stage-bg` | Canvas-stage background                        |
+| `--digit`    | Clock digits                                   |
+| `--glow`     | Optional digit glow                            |
+| `--ui`       | Primary UI text                                |
+| `--muted`    | Secondary text                                 |
+| `--panel`    | Control and weather panel fill                 |
+| `--border`   | Panel border                                   |
+| `--accent`   | Focus rings, links, small accents              |
+| `--rose`     | Decorative accent                              |
+| `--inset`    | Stage inset (used by the glass marble)         |
+| `--radius`   | Stage corner radius (used by the glass marble) |
+| `--font`     | Outfit with system-ui fallback                 |
 
 Colours are also mirrored in JavaScript because the canvas cannot read CSS variables during a
 draw pass. `THEMES` is the single source of truth for the canvas; `applyTheme` writes the same
@@ -59,14 +59,14 @@ values into CSS.
 
 ## Themes
 
-| Key      | Background          | Vines / leaves | Flowers                       | Bloom  |
-| -------- | ------------------- | -------------- | ----------------------------- | ------ |
-| `noir`   | Black               | Royal blue     | Red spiral roses              | Rose   |
-| `glass`  | White / cool grey   | Bright blue    | Multicolour roses             | Rose   |
-| `sakura` | Dark plum           | Green          | Pink daisies                  | Daisy  |
-| `neon`   | Near black          | Cyan           | Magenta, violet and green     | Rose   |
-| `sunset` | Purple-orange       | Gold           | Coral and amber roses         | Rose   |
-| `forest` | Deep green          | Olive          | Yellow and orange daisies     | Daisy  |
+| Key      | Background        | Vines / leaves | Flowers                   | Bloom |
+| -------- | ----------------- | -------------- | ------------------------- | ----- |
+| `noir`   | Black             | Royal blue     | Red spiral roses          | Rose  |
+| `glass`  | White / cool grey | Bright blue    | Multicolour roses         | Rose  |
+| `sakura` | Dark plum         | Green          | Pink daisies              | Daisy |
+| `neon`   | Near black        | Cyan           | Magenta, violet and green | Rose  |
+| `sunset` | Purple-orange     | Gold           | Coral and amber roses     | Rose  |
+| `forest` | Deep green        | Olive          | Yellow and orange daisies | Daisy |
 
 Auto rules, in order:
 

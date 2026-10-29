@@ -12,8 +12,7 @@
   --inset: 0px;
   --radius: 0px;
   --font:
-    'Outfit', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
-    sans-serif;
+    'Outfit', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 
 * {
@@ -256,6 +255,7 @@ body.no-meridiem #meridiem {
   color: var(--ui);
   text-shadow: 0 1px 12px color-mix(in srgb, var(--bg) 72%, transparent);
   transition: color 0.8s ease;
+  isolation: isolate;
 }
 
 #weather::before {
@@ -263,13 +263,12 @@ body.no-meridiem #meridiem {
   position: absolute;
   inset: -12px -18px -14px -16px;
   z-index: -1;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   border-radius: 22px;
-  background: radial-gradient(
-    120% 130% at 0% 0%,
-    color-mix(in srgb, var(--bg) 82%, transparent) 0%,
-    color-mix(in srgb, var(--bg) 48%, transparent) 48%,
-    transparent 78%
-  );
+  background: color-mix(in srgb, var(--bg) 68%, transparent);
+  box-shadow: 0 10px 34px color-mix(in srgb, var(--bg) 18%, transparent);
+  backdrop-filter: blur(10px) saturate(1.05);
+  -webkit-backdrop-filter: blur(10px) saturate(1.05);
   pointer-events: none;
 }
 
@@ -278,12 +277,9 @@ body.light #weather {
 }
 
 body.light #weather::before {
-  background: radial-gradient(
-    120% 130% at 0% 0%,
-    rgba(255, 255, 255, 0.88) 0%,
-    rgba(255, 255, 255, 0.48) 52%,
-    transparent 80%
-  );
+  border-color: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: 0 10px 34px rgba(40, 64, 90, 0.08);
 }
 
 #w-temp {
@@ -623,7 +619,12 @@ body.glass #sim:focus-visible {
   border-radius: 6px;
   background: var(--panel);
   color: var(--muted);
-  font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font:
+    10px/1.5 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
   white-space: pre-line;
   pointer-events: none;
 }

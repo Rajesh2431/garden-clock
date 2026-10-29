@@ -130,8 +130,7 @@ export class Garden {
       () => [W + 14, H * 0.14 + rnd() * H * 0.58],
       () => [rnd() * W * 0.22, H + 14],
     ];
-    const inside = (x, y) =>
-      x > clock.x && x < clock.x + clock.w && y > clock.y && y < clock.y + clock.h;
+    const inside = (x, y) => x > clock.x && x < clock.x + clock.w && y > clock.y && y < clock.y + clock.h;
     const outsideScene = (x, y) => x < -W * 0.25 || x > W * 1.25 || y < -H * 0.25 || y > H * 1.25;
     const totalLimit = Math.round(vineCount * 1.7);
 
@@ -447,8 +446,7 @@ export class Garden {
       const [px, py] = vine.pts[leaf.i];
       const grow = clamp((count - leaf.i) / 8, 0, 1);
       if (grow <= 0) continue;
-      const sway =
-        Math.sin(timestamp / 900 + vine.phase + leaf.i * 0.7) * 0.1 * windAmp;
+      const sway = Math.sin(timestamp / 900 + vine.phase + leaf.i * 0.7) * 0.1 * windAmp;
       ctx.save();
       ctx.translate(px, py);
       ctx.rotate(leaf.angle + sway);

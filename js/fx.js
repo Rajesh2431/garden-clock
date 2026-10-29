@@ -203,7 +203,7 @@ export class FX {
       p.x += dt * (p.speed + this.wind * 0.45) * p.z;
       if (p.x - p.r > W + 80) p.x = -p.r - 80;
       if (p.x + p.r < -100) p.x = W + p.r;
-      const y = fog ? p.y : p.y % Math.max(1, H * 0.6) + 20;
+      const y = fog ? p.y : (p.y % Math.max(1, H * 0.6)) + 20;
       const alpha = fog ? (light ? 0.34 : 0.2) : light ? 0.38 : 0.24;
       const gradient = x.createRadialGradient(p.x, y, 0, p.x, y, p.r);
       gradient.addColorStop(

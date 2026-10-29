@@ -81,12 +81,7 @@ function buildWeatherUrl(lat, lon) {
 }
 
 async function fetchJson(url, options = {}) {
-  const {
-    fetchImpl = globalThis.fetch,
-    timeoutMs = 9000,
-    signal,
-    init = {},
-  } = options;
+  const { fetchImpl = globalThis.fetch, timeoutMs = 9000, signal, init = {} } = options;
   const controller = new AbortController();
   const onAbort = () => controller.abort();
   if (signal) {
@@ -139,9 +134,7 @@ function cityFromResult(result) {
     lat: Number(result.latitude),
     lon: Number(result.longitude),
     name: result.name,
-    label: [result.name, result.admin1, result.country_code || result.country]
-      .filter(Boolean)
-      .join(', '),
+    label: [result.name, result.admin1, result.country_code || result.country].filter(Boolean).join(', '),
     admin1: result.admin1 || '',
     country: result.country || '',
     countryCode: result.country_code || '',
@@ -231,10 +224,7 @@ export function writeWeatherCache(lat, lon, weather, storage, at = Date.now()) {
   const backend = safeStorage(storage);
   if (!backend) return;
   try {
-    backend.setItem(
-      WEATHER_CACHE_KEY,
-      JSON.stringify({ lat, lon, at, weather: { ...weather } }),
-    );
+    backend.setItem(WEATHER_CACHE_KEY, JSON.stringify({ lat, lon, at, weather: { ...weather } }));
   } catch {
     // A full or disabled localStorage must never break the clock.
   }
@@ -245,12 +235,7 @@ export function writeWeatherCache(lat, lon, weather, storage, at = Date.now()) {
  * last reading for the same coordinates when the network is unavailable.
  */
 export async function fetchWeatherCached(lat, lon, options = {}) {
-  const {
-    storage,
-    force = false,
-    maxAgeMs = WEATHER_CACHE_TTL,
-    nowMs = Date.now,
-  } = options;
+  const { storage, force = false, maxAgeMs = WEATHER_CACHE_TTL, nowMs = Date.now } = options;
   const cached = readWeatherCache(storage);
   const samePlace =
     cached &&

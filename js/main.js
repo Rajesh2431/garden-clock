@@ -106,10 +106,7 @@ const state = {
   h12: !!store.get(KEYS.h12, false),
   secs: store.get(KEYS.secs, true),
   loc: initialLoc,
-  tz:
-    initialLoc?.timezone ||
-    Intl.DateTimeFormat().resolvedOptions().timeZone ||
-    'UTC',
+  tz: initialLoc?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
   kind: 'clear',
   isDay: true,
   wind: 0,
@@ -722,8 +719,7 @@ function saveGarden() {
     const clockY = timeRect.top - stageRect.top + timeRect.height * 0.55;
     const family = getComputedStyle(document.body).fontFamily || 'sans-serif';
     const fontSize =
-      Number.parseFloat(getComputedStyle(els.time).fontSize) ||
-      Math.min(width * 0.18, height * 0.3);
+      Number.parseFloat(getComputedStyle(els.time).fontSize) || Math.min(width * 0.18, height * 0.3);
     const p = parts(state.tz, state.h12);
     ctx.fillStyle = theme.digit;
     ctx.textBaseline = 'alphabetic';
@@ -735,9 +731,7 @@ function saveGarden() {
     const smallSize = fontSize * 0.2;
     ctx.font = `200 ${smallSize}px ${family}`;
     const secondsWidth = seconds ? ctx.measureText(seconds).width : 0;
-    const meridiemWidth = p.meridiem
-      ? ctx.measureText(p.meridiem).width + smallSize * 0.4
-      : 0;
+    const meridiemWidth = p.meridiem ? ctx.measureText(p.meridiem).width + smallSize * 0.4 : 0;
     const gap = fontSize * 0.12;
     const total = mainWidth + (seconds ? gap + secondsWidth : 0) + meridiemWidth;
     let x = clockX - total / 2;
@@ -775,11 +769,7 @@ function saveGarden() {
       ctx.fillText(`${state.temp}°C`, wx, wy + Math.max(22, width * 0.034));
       ctx.font = `300 ${Math.max(11, width * 0.012)}px ${family}`;
       ctx.globalAlpha = 0.82;
-      ctx.fillText(
-        `${label(state.code)} · ${placeName(state.loc)}`,
-        wx,
-        wy + Math.max(34, width * 0.048),
-      );
+      ctx.fillText(`${label(state.code)} · ${placeName(state.loc)}`, wx, wy + Math.max(34, width * 0.048));
       ctx.globalAlpha = 1;
     }
 
@@ -816,9 +806,7 @@ async function toggleFullscreen() {
 
 function updateFullscreenState() {
   els.fullscreen.setAttribute('aria-pressed', String(!!document.fullscreenElement));
-  els.fullscreen.title = document.fullscreenElement
-    ? 'Exit full screen (F)'
-    : 'Toggle full screen (F)';
+  els.fullscreen.title = document.fullscreenElement ? 'Exit full screen (F)' : 'Toggle full screen (F)';
 }
 
 function handleKeydown(event) {

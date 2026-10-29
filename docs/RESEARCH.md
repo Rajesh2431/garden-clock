@@ -15,13 +15,13 @@ Date: 2026-10-27
 `Date.now()` can be wrong by seconds or minutes on a device with a bad clock. The design uses a
 latency-compensated offset from an internet time source and falls back to the local clock.
 
-| Option                                | Result                                                                                             |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `worldtimeapi.org`                    | Returned usable JSON in earlier trials, but connections reset repeatedly during this build. Not used. |
-| `timeapi.io`                          | Stable HTTPS JSON endpoint with a UTC `dateTime` field. Works cross-origin. Chosen as primary.      |
-| Cloudflare `https://cloudflare.com/cdn-cgi/trace` | Plain-text `ts=` field with a Unix timestamp and permissive CORS. Chosen as fallback.   |
-| HTTP `Date` header from a third party | The browser does not expose arbitrary response headers cross-origin unless CORS allows it. Not reliable enough. |
-| Browser clock                          | Final fallback, clearly labelled as local.                                                          |
+| Option                                            | Result                                                                                                          |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `worldtimeapi.org`                                | Returned usable JSON in earlier trials, but connections reset repeatedly during this build. Not used.           |
+| `timeapi.io`                                      | Stable HTTPS JSON endpoint with a UTC `dateTime` field. Works cross-origin. Chosen as primary.                  |
+| Cloudflare `https://cloudflare.com/cdn-cgi/trace` | Plain-text `ts=` field with a Unix timestamp and permissive CORS. Chosen as fallback.                           |
+| HTTP `Date` header from a third party             | The browser does not expose arbitrary response headers cross-origin unless CORS allows it. Not reliable enough. |
+| Browser clock                                     | Final fallback, clearly labelled as local.                                                                      |
 
 timeapi.io returns a `dateTime` without a timezone suffix, for example
 `2026-10-26T20:19:16.0621867`. Treating that string directly as local time would shift the clock
@@ -56,14 +56,14 @@ https://geocoding-api.open-meteo.com/v1/search?name=...&count=5&language=en&form
 
 WMO codes are grouped for rendering:
 
-| Codes          | Visual kind |
-| -------------- | ----------- |
-| 0, 1           | clear       |
-| 2, 3           | cloud       |
-| 45, 48         | fog         |
-| 51-67, 80-82   | rain        |
-| 71-77, 85, 86  | snow        |
-| 95-99          | storm       |
+| Codes         | Visual kind |
+| ------------- | ----------- |
+| 0, 1          | clear       |
+| 2, 3          | cloud       |
+| 45, 48        | fog         |
+| 51-67, 80-82  | rain        |
+| 71-77, 85, 86 | snow        |
+| 95-99         | storm       |
 
 Unknown or missing codes fall back to cloud rather than claiming clear weather.
 

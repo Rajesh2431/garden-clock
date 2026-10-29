@@ -35,7 +35,10 @@
     <meta property="og:image" content="%BASE_URL%og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="Garden Clock: a white clock surrounded by blue vines and red roses." />
+    <meta
+      property="og:image:alt"
+      content="Garden Clock: a white clock surrounded by blue vines and red roses."
+    />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Garden Clock — a living clock" />
     <meta
@@ -43,7 +46,10 @@
       content="A live clock wrapped in a procedural garden that reacts to real weather and local time."
     />
     <meta name="twitter:image" content="%BASE_URL%og.png" />
-    <meta name="twitter:image:alt" content="Garden Clock: a white clock surrounded by blue vines and red roses." />
+    <meta
+      name="twitter:image:alt"
+      content="Garden Clock: a white clock surrounded by blue vines and red roses."
+    />
 
     <link rel="stylesheet" href="/css/style.css" />
   </head>
@@ -58,8 +64,8 @@
       <header id="clock">
         <h1 class="visually-hidden">Garden Clock</h1>
         <div id="time" role="timer" aria-live="off" aria-label="Current time">
-          <span id="hh">--</span><span id="colon" aria-hidden="true">:</span
-          ><span id="mm">--</span><span id="ss">--</span><span id="meridiem"></span>
+          <span id="hh">--</span><span id="colon" aria-hidden="true">:</span><span id="mm">--</span
+          ><span id="ss">--</span><span id="meridiem"></span>
         </div>
         <p id="clock-meta">
           <span id="date"></span>
@@ -141,9 +147,7 @@
         <span>sec</span>
       </label>
 
-      <button id="regrow" class="text-button" type="button" title="Grow a new garden (R)">
-        Regrow
-      </button>
+      <button id="regrow" class="text-button" type="button" title="Grow a new garden (R)">Regrow</button>
 
       <button
         id="share"
@@ -190,8 +194,8 @@
     </nav>
 
     <p class="visually-hidden">
-      Keyboard shortcuts: F toggles full screen, H hides or shows the controls, R grows a new
-      garden. The clock is decorative and does not announce every second.
+      Keyboard shortcuts: F toggles full screen, H hides or shows the controls, R grows a new garden. The
+      clock is decorative and does not announce every second.
     </p>
 
     <div id="toast" role="status" aria-live="polite"></div>

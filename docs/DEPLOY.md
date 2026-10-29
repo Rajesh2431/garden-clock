@@ -100,9 +100,9 @@ actions. Pages requires HTTPS for service workers; GitHub provides it automatica
 
 ## Environment variables
 
-| Variable                  | Default | Notes                                              |
-| ------------------------- | ------- | -------------------------------------------------- |
-| `VITE_BASE`               | `/`     | Build-time base path.                              |
+| Variable                  | Default | Notes                                               |
+| ------------------------- | ------- | --------------------------------------------------- |
+| `VITE_BASE`               | `/`     | Build-time base path.                               |
 | `VITE_ANALYTICS_ENDPOINT` | unset   | Optional; receives coarse theme/weather events.     |
 | `VITE_ERROR_ENDPOINT`     | unset   | Optional; receives message, source, line and stack. |
 

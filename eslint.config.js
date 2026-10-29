@@ -2,14 +2,7 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: [
-      'dist',
-      'coverage',
-      'node_modules',
-      'playwright-report',
-      'test-results',
-      'public',
-    ],
+    ignores: ['dist', 'coverage', 'node_modules', 'playwright-report', 'test-results', 'public'],
   },
   {
     files: ['js/**/*.js', 'tests/**/*.js', 'vite.config.js', 'playwright.config.js'],

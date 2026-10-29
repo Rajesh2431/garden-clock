@@ -55,7 +55,10 @@ export default defineConfig({
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
             handler: 'StaleWhileRevalidate',
-            options: { cacheName: 'google-fonts-styles', expiration: { maxEntries: 8, maxAgeSeconds: 31536000 } },
+            options: {
+              cacheName: 'google-fonts-styles',
+              expiration: { maxEntries: 8, maxAgeSeconds: 31536000 },
+            },
           },
           {
             urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,

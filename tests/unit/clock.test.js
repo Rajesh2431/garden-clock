@@ -24,9 +24,7 @@ describe('time parsers', () => {
 
   it('does not append a second zone to an explicit offset', () => {
     expect(parseTimeApiDate('2026-10-26T20:19:16Z')).toBe(Date.parse('2026-10-26T20:19:16Z'));
-    expect(parseTimeApiDate('2026-10-26T20:19:16+02:00')).toBe(
-      Date.parse('2026-10-26T18:19:16Z'),
-    );
+    expect(parseTimeApiDate('2026-10-26T20:19:16+02:00')).toBe(Date.parse('2026-10-26T18:19:16Z'));
   });
 
   it('rejects empty and invalid time strings', () => {
@@ -44,9 +42,7 @@ describe('time parsers', () => {
   });
 
   it('parses HTTP dates', () => {
-    expect(parseHttpDate('Mon, 26 Oct 2026 20:19:16 GMT')).toBe(
-      Date.parse('2026-10-26T20:19:16Z'),
-    );
+    expect(parseHttpDate('Mon, 26 Oct 2026 20:19:16 GMT')).toBe(Date.parse('2026-10-26T20:19:16Z'));
     expect(parseHttpDate('')).toBeNaN();
     expect(parseHttpDate('nope')).toBeNaN();
   });
