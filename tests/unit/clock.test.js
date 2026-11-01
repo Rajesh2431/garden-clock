@@ -10,6 +10,7 @@ import {
   resetClock,
   syncInfo,
   syncTime,
+  wallDate,
 } from '../../js/clock.js';
 
 beforeEach(() => {
@@ -178,5 +179,21 @@ describe('parts', () => {
     expect(clock.timeZone).toBeTruthy();
     expect(clock.hh).toMatch(/^\d{2}$/);
     expect(clock.mm).toMatch(/^\d{2}$/);
+  });
+});
+
+describe('wallDate', () => {
+  it('maps an instant to the wall-clock date in the given zone', () => {
+    // 2026-03-20T20:00Z is already 01:30 on 21 March in Kolkata.
+    const instant = Date.UTC(2026, 2, 20, 20, 0, 0);
+    const kolkata = wallDate('Asia/Kolkata', instant);
+    expect(kolkata.toISOString()).toBe('2026-03-21T01:30:00.000Z');
+    const newYork = wallDate('America/New_York', instant);
+    expect(newYork.toISOString()).toBe('2026-03-20T16:00:00.000Z');
+  });
+
+  it('falls back to the local zone for an invalid zone', () => {
+    const instant = Date.UTC(2026, 0, 1, 12, 0, 0);
+    expect(Number.isFinite(wallDate('Not/AZone', instant).getTime())).toBe(true);
   });
 });

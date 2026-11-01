@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { GROW_MS, Garden } from '../../js/garden.js';
+import { FLOWER_SPECIES, GROW_MS, Garden, MAX_EXTRA_GROWTH } from '../../js/garden.js';
+import { SEASON_KEYS } from '../../js/almanac.js';
 import { THEMES } from '../../js/themes.js';
 
 function fakeCanvas(width = 1200, height = 800) {
@@ -26,12 +27,36 @@ function fakeCanvas(width = 1200, height = 800) {
 }
 
 function buildGarden(seed = 42, width = 1200, height = 800, options = {}) {
+  const { theme = THEMES.noir, season = 'spring', growth = 0, ...gardenOptions } = options;
   const { canvas } = fakeCanvas(width, height);
-  const garden = new Garden(canvas, options);
+  const garden = new Garden(canvas, gardenOptions);
   garden.W = width;
   garden.H = height;
-  garden.build({ x: 300, y: 320, w: 600, h: 160 }, seed, THEMES.noir);
+  garden.build({ x: 300, y: 320, w: 600, h: 160 }, seed, theme, { season, growth });
   return garden;
+}
+
+function geometryOf(garden) {
+  const vines = garden.vines.map((vine) => ({
+    pts: vine.pts,
+    leaves: vine.leaves,
+    flowers: vine.flowers.map(({ species: _species, ...rest }) => rest),
+    branches: vine.branches,
+    delay: vine.delay,
+    width: vine.width,
+    depth: vine.depth,
+    phase: vine.phase,
+    tip: vine.tip,
+  }));
+  const clusters = garden.clusters.map(({ species: _species, ...rest }) => rest);
+  return { vines, clusters };
+}
+
+function speciesOf(garden) {
+  return [
+    ...garden.vines.flatMap((vine) => vine.flowers.map((flower) => flower.species)),
+    ...garden.clusters.map((cluster) => cluster.species),
+  ];
 }
 
 describe('Garden determinism', () => {
@@ -54,9 +79,9 @@ describe('Garden determinism', () => {
 
   it('ignores the theme while generating geometry', () => {
     const garden = buildGarden(7);
-    const before = JSON.stringify(garden.vines);
-    garden.build(garden.box, 7, THEMES.glass);
-    expect(JSON.stringify(garden.vines)).toBe(before);
+    const before = geometryOf(garden);
+    garden.build(garden.box, 7, THEMES.glass, { season: 'spring' });
+    expect(geometryOf(garden)).toEqual(before);
   });
 
   it('builds quickly enough for an instant regrow', () => {
@@ -115,6 +140,172 @@ describe('Garden composition', () => {
     for (const theme of Object.values(THEMES)) {
       expect(() => garden.draw(theme, performance.now() + 3000)).not.toThrow();
     }
+  });
+
+  it('draws every flower species without throwing', () => {
+    const garden = buildGarden(42);
+    const timestamp = performance.now();
+    for (const species of FLOWER_SPECIES) {
+      expect(() =>
+        garden.drawFlower(garden.x, 200, 200, 20, 0.2, THEMES.glass, 1.2, 1, 3, species),
+      ).not.toThrow();
+    }
+    expect(garden.draw).toBeTypeOf('function');
+    expect(timestamp).toBeGreaterThan(0);
+  });
+});
+
+describe('Garden species and seasons', () => {
+  it('offers nine distinct species', () => {
+    expect(new Set(FLOWER_SPECIES).size).toBe(9);
+    expect(FLOWER_SPECIES).toContain('sunflower');
+    expect(FLOWER_SPECIES).toContain('chrysanthemum');
+  });
+
+  it('draws from the seasonal mix', () => {
+    const seasonal = {};
+    for (const season of SEASON_KEYS) {
+      const seen = new Set();
+      for (let seed = 1; seed <= 6; seed += 1) {
+        for (const species of speciesOf(buildGarden(seed, 1200, 800, { theme: THEMES.glass, season }))) {
+          seen.add(species);
+        }
+      }
+      seasonal[season] = seen;
+    }
+    expect(seasonal.spring.has('tulip')).toBe(true);
+    expect(seasonal.summer.has('sunflower')).toBe(true);
+    expect(seasonal.autumn.has('chrysanthemum')).toBe(true);
+    expect(seasonal.winter.has('camellia')).toBe(true);
+  });
+
+  it('covers every species across the four seasons', () => {
+    const seen = new Set();
+    for (const season of SEASON_KEYS) {
+      for (let seed = 1; seed <= 4; seed += 1) {
+        for (const species of speciesOf(buildGarden(seed, 1200, 800, { theme: THEMES.glass, season }))) {
+          seen.add(species);
+        }
+      }
+    }
+    expect([...seen].sort()).toEqual([...FLOWER_SPECIES].sort());
+  });
+
+  it('keeps the reference noir garden to roses and daisies', () => {
+    for (const season of SEASON_KEYS) {
+      const garden = buildGarden(1234, 1200, 800, { theme: THEMES.noir, season });
+      expect(speciesOf(garden).every((species) => ['rose', 'daisy'].includes(species))).toBe(true);
+      expect(garden.clusters.every((cluster) => cluster.species === 'rose')).toBe(true);
+    }
+  });
+});
+
+describe('Continuous growth', () => {
+  it('restores saved growth before the first draw', () => {
+    const base = buildGarden(2026);
+    const grown = buildGarden(2026, 1200, 800, { growth: 5 });
+    expect(grown.extraGrowth).toBe(5);
+    expect(grown.vines.length).toBe(base.vines.length + 5);
+  });
+
+  it('caps persisted growth and stops adding vines at the cap', () => {
+    const garden = buildGarden(2026);
+    garden.restoreGrowth(MAX_EXTRA_GROWTH + 12);
+    expect(garden.extraGrowth).toBe(MAX_EXTRA_GROWTH);
+    expect(garden.growOne()).toBeNull();
+    expect(garden.extraGrowth).toBe(MAX_EXTRA_GROWTH);
+  });
+
+  it('generates deterministic extra vines', () => {
+    const first = buildGarden(77);
+    const second = buildGarden(77);
+    const firstVine = first.growOne({ instant: true });
+    const secondVine = second.growOne({ instant: true });
+    expect(firstVine.pts).toEqual(secondVine.pts);
+    expect(firstVine.flowers.map((flower) => flower.species)).toEqual(
+      secondVine.flowers.map((flower) => flower.species),
+    );
+    expect(first.extraGrowth).toBe(1);
+    expect(firstVine.bornAt).toBe(0);
+  });
+
+  it('accepts a short growth at the scene edge', () => {
+    const garden = buildGarden(5, 300, 300);
+    const vine = garden.growOne({ instant: true });
+    expect(vine).not.toBeNull();
+    expect(vine.pts.length).toBeGreaterThanOrEqual(4);
+    expect(garden.extraGrowth).toBe(1);
+  });
+});
+
+describe('Click blooms and butterflies', () => {
+  it('blooms where the visitor clicks and sends a butterfly', () => {
+    const garden = buildGarden(11);
+    const before = garden.butterflies.length;
+    const flower = garden.bloomAt(40, 40);
+    expect(flower.x).toBe(40);
+    expect(flower.y).toBe(40);
+    expect(garden.extras).toContain(flower);
+    expect(garden.butterflies.length).toBe(before + 1);
+    expect(garden.butterflies.at(-1).fromX).toBeDefined();
+  });
+
+  it('moves a bloom below the clock instead of obscuring the digits', () => {
+    const garden = buildGarden(11);
+    const { box } = garden;
+    const flower = garden.bloomAt(box.x + box.w / 2, box.y + box.h / 2);
+    expect(flower.y).toBeGreaterThan(box.y + box.h);
+    expect(flower.y).toBeLessThan(garden.H);
+  });
+
+  it('caps blooms and visitors', () => {
+    const garden = buildGarden(12);
+    for (let i = 0; i < 60; i += 1) garden.bloomAt(30 + i, 30 + i);
+    expect(garden.extras).toHaveLength(48);
+    expect(garden.butterflies.length).toBeLessThanOrEqual(8);
+  });
+
+  it('keeps clicked blooms and the garden age when the same garden is rebuilt', () => {
+    const garden = buildGarden(21);
+    garden.t0 = performance.now() - 60_000;
+    const age = garden.t0;
+    const flower = garden.bloomAt(40, 40);
+    const visitors = garden.butterflies.length;
+    garden.build(garden.box, 21, THEMES.sakura, { season: 'autumn' });
+    expect(garden.t0).toBe(age);
+    expect(garden.extras).toHaveLength(1);
+    expect(garden.extras[0]).toMatchObject({ x: flower.x, y: flower.y, species: flower.species });
+    expect(garden.butterflies.length).toBe(visitors);
+  });
+
+  it('clears clicked blooms and replays growth for a new seed', () => {
+    const garden = buildGarden(21);
+    garden.t0 = performance.now() - 60_000;
+    garden.bloomAt(40, 40);
+    garden.build(garden.box, 22, THEMES.noir, { season: 'spring' });
+    expect(garden.extras).toEqual([]);
+    expect(garden.t0).toBeGreaterThan(performance.now() - 1000);
+  });
+
+  it('moves clicked blooms with a resize and drops any that would cover the clock', () => {
+    const garden = buildGarden(21);
+    garden.bloomAt(100, 100);
+    garden.bloomAt(1100, 300);
+    garden.W = 600;
+    garden.H = 400;
+    const box = { x: 500, y: 100, w: 90, h: 80 };
+    garden.build(box, 21, THEMES.noir, { season: 'spring' });
+    // (100,100) → (50,50) survives; (1100,300) → (550,150) is inside the new box.
+    expect(garden.extras).toHaveLength(1);
+    expect(garden.extras[0].x).toBeCloseTo(50);
+    expect(garden.extras[0].y).toBeCloseTo(50);
+  });
+
+  it('does not summon butterflies in reduced-motion mode', () => {
+    const garden = buildGarden(12, 1200, 800, { reducedMotion: true });
+    const flower = garden.bloomAt(40, 40);
+    expect(flower).toBeTruthy();
+    expect(garden.butterflies).toEqual([]);
   });
 });
 

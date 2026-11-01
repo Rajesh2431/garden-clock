@@ -12,6 +12,7 @@ export default [
       globals: {
         ...globals.browser,
         ...globals.node,
+        __VERCEL__: 'readonly',
       },
     },
     rules: {

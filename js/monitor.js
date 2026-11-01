@@ -1,5 +1,7 @@
 // Optional, privacy-friendly monitoring. Nothing is sent unless an endpoint is
-// configured at build time; theme and weather kind are the only analytics data.
+// configured at build time. Events carry UI state only (theme, weather kind,
+// season, phase, flower species, garden seed and growth count) and never
+// coordinates, city names or other personal data.
 
 const errorEndpoint = import.meta.env.VITE_ERROR_ENDPOINT || '';
 const analyticsEndpoint = import.meta.env.VITE_ANALYTICS_ENDPOINT || '';

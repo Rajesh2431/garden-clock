@@ -3,9 +3,35 @@
 // reaches them. Everything is driven by a seed, so a link reproduces a garden.
 
 import { clamp, easeOutBack, easeOutCubic, mulberry32 } from './rand.js';
+import { seasonInfo } from './almanac.js';
 
 const TAU = Math.PI * 2;
 export const GROW_MS = 7000;
+export const EXTRA_GROW_MS = 2600;
+export const MAX_EXTRA_GROWTH = 28;
+export const FLOWER_SPECIES = [
+  'rose',
+  'daisy',
+  'tulip',
+  'cosmos',
+  'sunflower',
+  'lotus',
+  'bell',
+  'chrysanthemum',
+  'camellia',
+];
+
+function pickSpecies(rnd, theme, season, cluster = false) {
+  const fallback = theme?.bloom || 'rose';
+  if (theme?.seasonal === false) {
+    if (cluster) return 'rose';
+    return rnd() < 0.78 ? 'rose' : 'daisy';
+  }
+  const mix = seasonInfo(season).flowers;
+  if (cluster) return rnd() < 0.36 ? fallback : mix[Math.floor(rnd() * mix.length)];
+  if (rnd() < 0.46) return fallback;
+  return mix[Math.floor(rnd() * mix.length)] || fallback;
+}
 
 function normalizeBox(box, width, height) {
   const fallback = { x: width * 0.25, y: height * 0.4, w: width * 0.5, h: height * 0.2 };
@@ -16,6 +42,30 @@ function normalizeBox(box, width, height) {
     w: clamp(Number(source.w) || 0, 10, width),
     h: clamp(Number(source.h) || 0, 10, height),
   };
+}
+
+function sameBox(a, b) {
+  if (!a || !b) return false;
+  return (
+    Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1 && Math.abs(a.w - b.w) < 1 && Math.abs(a.h - b.h) < 1
+  );
+}
+
+// Clicked blooms survive a rebuild of the same garden. After a resize they move
+// proportionally, and any that would now cover the digits are dropped.
+function carryExtras(previous, width, height, box) {
+  const sx = previous.W ? width / previous.W : 1;
+  const sy = previous.H ? height / previous.H : 1;
+  return previous.extras
+    .map((flower) => ({
+      ...flower,
+      x: clamp(flower.x * sx, 14, width - 14),
+      y: clamp(flower.y * sy, 14, height - 14),
+    }))
+    .filter(
+      (flower) =>
+        !(flower.x > box.x && flower.x < box.x + box.w && flower.y > box.y && flower.y < box.y + box.h),
+    );
 }
 
 function makeClusterStem(cx, cy, scale, rnd, delay) {
@@ -58,6 +108,7 @@ export class Garden {
     this.butterflies = [];
     this.box = null;
     this.theme = null;
+    this.season = 'spring';
     this.seed = 1;
     this.t0 = 0;
     this.wind = 0;
@@ -65,6 +116,11 @@ export class Garden {
     this.lowPower = !!options.lowPower;
     this.stemsCache = null;
     this.buildMs = 0;
+    this.extraGrowth = 0;
+    this.extras = [];
+    this.newestGrowthAt = 0;
+    this.builtW = 0;
+    this.builtH = 0;
   }
 
   resize() {
@@ -105,19 +161,44 @@ export class Garden {
    * Build a complete garden for a clock bounding box. The same seed and size
    * always produce identical vines, leaves, flowers and visitors.
    */
-  build(box, seed = Date.now(), theme) {
+  build(box, seed = Date.now(), theme, options = {}) {
     const started = performance.now();
     if (!this.W || !this.H) this.resize();
+    const previous = {
+      seed: this.seed,
+      W: this.builtW,
+      H: this.builtH,
+      box: this.box,
+      t0: this.t0,
+      extras: this.extras,
+      visitors: this.butterflies.filter((item) => item.fromX != null),
+      built: this.vines.length > 0,
+    };
     this.theme = theme || this.theme;
+    this.season = options.season || this.season || 'spring';
     this.seed = Number(seed) >>> 0 || 1;
     this.box = normalizeBox(box, this.W, this.H);
+    const sameSeed = previous.built && previous.seed === this.seed;
+    // A theme, season or toggle change rebuilds with the same seed and layout.
+    // Keep the garden's age in that case so it does not replay the growth.
+    const sameLayout =
+      sameSeed && previous.W === this.W && previous.H === this.H && sameBox(previous.box, this.box);
     this.vines = [];
     this.clusters = [];
     this.butterflies = [];
+    this.extras = sameSeed ? carryExtras(previous, this.W, this.H, this.box) : [];
+    this.extraGrowth = 0;
+    this.newestGrowthAt = 0;
     this.stemsCache = null;
-    this.t0 = this.reduced ? performance.now() - GROW_MS * 2 : performance.now();
+    this.builtW = this.W;
+    this.builtH = this.H;
+    if (this.reduced) this.t0 = performance.now() - GROW_MS * 2;
+    else this.t0 = sameLayout ? previous.t0 : performance.now();
 
     const rnd = mulberry32(this.seed);
+    // Species are drawn from a separate stream so changing a theme never moves
+    // a vine, leaf or flower position.
+    const speciesRnd = mulberry32((this.seed ^ 0x9e3779b9) >>> 0);
     const { W, H, box: clock } = this;
     const scale = clamp(Math.min(W, H) / 900, 0.58, 1.35);
     const step = clamp(W / 150, 4, 8);
@@ -173,6 +254,7 @@ export class Garden {
             ci: Math.floor(rnd() * 997),
             ph: rnd() * TAU,
             rot: (rnd() - 0.5) * 0.8,
+            species: pickSpecies(speciesRnd, this.theme, this.season),
           });
         }
         if (
@@ -206,6 +288,7 @@ export class Garden {
         ci: Math.floor(rnd() * 997),
         ph: rnd() * TAU,
         rot: (rnd() - 0.5) * 0.9,
+        species: pickSpecies(speciesRnd, this.theme, this.season),
         tip: true,
       });
 
@@ -297,6 +380,7 @@ export class Garden {
           ph: rnd() * TAU,
           rot: (rnd() - 0.5) * 1.1,
           delay: delay + rnd() * 0.18,
+          species: pickSpecies(speciesRnd, this.theme, this.season, true),
         });
       }
       this.clusters.push({ kind: 'spot', x: spot.x, y: spot.y });
@@ -308,6 +392,7 @@ export class Garden {
     this.clusters = this.clusters.filter((item) => item.kind !== 'spot');
 
     if (!this.reduced) {
+      if (sameLayout) this.butterflies.push(...previous.visitors);
       const butterflyCount = W < 700 ? 1 : 2;
       for (let i = 0; i < butterflyCount; i += 1) {
         this.butterflies.push({
@@ -323,7 +408,199 @@ export class Garden {
       }
     }
 
+    this.restoreGrowth(Number(options.growth) || 0);
     this.buildMs = performance.now() - started;
+  }
+
+  restoreGrowth(count) {
+    const target = Math.min(MAX_EXTRA_GROWTH, Math.max(0, Math.floor(Number(count) || 0)));
+    while (this.extraGrowth < target) {
+      const before = this.extraGrowth;
+      this.growOne({ instant: true });
+      if (this.extraGrowth === before) break;
+    }
+    return this.extraGrowth;
+  }
+
+  /**
+   * Add one short vine at an edge without rebuilding the base garden. This is
+   * the idle-growth primitive used by both live sessions and saved gardens.
+   */
+  growOne(options = {}) {
+    if (this.extraGrowth >= MAX_EXTRA_GROWTH) return null;
+    if (!this.W || !this.H) this.resize();
+    this.extraGrowth += 1;
+    const rnd = mulberry32((this.seed ^ Math.imul(this.extraGrowth, 0x9e3779b1)) >>> 0);
+    const speciesRnd = mulberry32((this.seed ^ Math.imul(this.extraGrowth, 0x85ebca6b)) >>> 0);
+    const { W, H, box: clock } = this;
+    const scale = clamp(Math.min(W, H) / 900, 0.58, 1.35);
+    const instant = !!options.instant || this.reduced;
+    const bornAt = instant ? 0 : performance.now();
+    const edge = Math.floor(rnd() * 4);
+    let x;
+    let y;
+    let targetX;
+    let targetY;
+    if (edge === 0) {
+      x = -12;
+      y = H * (0.12 + rnd() * 0.76);
+      targetX = W * (0.04 + rnd() * 0.22);
+      targetY = H * (0.08 + rnd() * 0.84);
+    } else if (edge === 1) {
+      x = W + 12;
+      y = H * (0.12 + rnd() * 0.76);
+      targetX = W * (0.74 + rnd() * 0.22);
+      targetY = H * (0.08 + rnd() * 0.84);
+    } else if (edge === 2) {
+      x = W * (0.08 + rnd() * 0.84);
+      y = -12;
+      targetX = W * (0.06 + rnd() * 0.88);
+      targetY = H * (0.04 + rnd() * 0.26);
+    } else {
+      x = W * (0.08 + rnd() * 0.84);
+      y = H + 12;
+      targetX = W * (0.06 + rnd() * 0.88);
+      targetY = H * (0.68 + rnd() * 0.28);
+    }
+
+    let angle = Math.atan2(targetY - y, targetX - x) + (rnd() - 0.5) * 0.7;
+    let wobble = rnd() * TAU;
+    const pts = [[x, y]];
+    const leaves = [];
+    const steps = 16 + Math.floor(rnd() * 18);
+    const step = clamp(W / 170, 3.4, 6);
+    for (let k = 0; k < steps; k += 1) {
+      wobble += 0.13 + rnd() * 0.04;
+      const desired = Math.atan2(targetY - y, targetX - x);
+      const diff = Math.atan2(Math.sin(desired - angle), Math.cos(desired - angle));
+      angle += diff * 0.055 + Math.sin(wobble) * 0.09 + (rnd() - 0.5) * 0.05;
+      x += Math.cos(angle) * step;
+      y += Math.sin(angle) * step;
+      if (x < -W * 0.2 || x > W * 1.2 || y < -H * 0.2 || y > H * 1.2) break;
+      // Keep at least a few points so every persisted growth produces a vine.
+      if (
+        pts.length > 3 &&
+        clock &&
+        x > clock.x &&
+        x < clock.x + clock.w &&
+        y > clock.y &&
+        y < clock.y + clock.h
+      ) {
+        break;
+      }
+      pts.push([x, y]);
+      if (k % 5 === 3) {
+        leaves.push({
+          i: k,
+          angle: angle + (k % 10 < 5 ? 1 : -1) * (0.6 + rnd() * 0.45),
+          size: (7 + rnd() * 11) * scale,
+        });
+      }
+    }
+    if (pts.length < 4) {
+      this.extraGrowth -= 1;
+      this.newestGrowthAt = 0;
+      return null;
+    }
+
+    const flowerCount = rnd() < 0.34 ? 2 : 1;
+    const flowers = [];
+    for (let i = 0; i < flowerCount; i += 1) {
+      flowers.push({
+        i: i === 0 ? pts.length - 1 : Math.max(2, Math.floor(pts.length * (0.58 + rnd() * 0.2))),
+        r: (13 + rnd() * 16) * scale,
+        ci: Math.floor(rnd() * 997),
+        ph: rnd() * TAU,
+        rot: (rnd() - 0.5) * 0.9,
+        species: pickSpecies(speciesRnd, this.theme, this.season),
+        tip: i === 0,
+      });
+    }
+
+    const vine = {
+      pts,
+      leaves,
+      flowers,
+      delay: 0,
+      width: Math.max(0.8, (1.15 + rnd() * 0.8) * scale),
+      depth: 1,
+      phase: rnd() * TAU,
+      clusterStem: true,
+      bornAt,
+      growMs: EXTRA_GROW_MS,
+    };
+    this.vines.push(vine);
+    this.stemsCache = null;
+    this.newestGrowthAt = bornAt;
+    return vine;
+  }
+
+  vineLocal(vine, grown, timestamp) {
+    if (vine.bornAt) {
+      return easeOutCubic(clamp((timestamp - vine.bornAt) / (vine.growMs || EXTRA_GROW_MS), 0, 1));
+    }
+    return this.vineProgress(vine, grown);
+  }
+
+  /**
+   * Bloom a single flower where the visitor clicked and send a butterfly to it.
+   * The clock box is protected so a bloom never obscures the digits.
+   */
+  bloomAt(x, y, options = {}) {
+    if (!this.W || !this.H) this.resize();
+    const season = options.season || this.season;
+    const scale = clamp(Math.min(this.W, this.H) / 900, 0.58, 1.35);
+    let px = clamp(Number(x) || 0, 14, this.W - 14);
+    let py = clamp(Number(y) || 0, 14, this.H - 14);
+    const clock = this.box;
+    if (clock && px > clock.x && px < clock.x + clock.w && py > clock.y && py < clock.y + clock.h) {
+      py = clock.y + clock.h + 20 < this.H ? clock.y + clock.h + 20 : clamp(clock.y - 20, 14, this.H - 14);
+    }
+    const rnd = mulberry32(
+      (this.seed ^ Math.imul(this.extras.length + 1, 0x85ebca6b) ^ Math.floor(performance.now())) >>> 0,
+    );
+    const flower = {
+      x: px,
+      y: py,
+      r: (16 + rnd() * 11) * scale,
+      rot: (rnd() - 0.5) * 1.1,
+      ph: rnd() * TAU,
+      ci: Math.floor(rnd() * 997),
+      species: options.species || pickSpecies(rnd, this.theme, season),
+      bornAt: this.reduced ? 0 : performance.now(),
+      stem: (8 + rnd() * 10) * scale,
+      stemBend: (rnd() - 0.5) * 0.7,
+    };
+    this.extras.push(flower);
+    if (this.extras.length > 48) this.extras.shift();
+    this.summonButterfly(px, py);
+    return flower;
+  }
+
+  summonButterfly(x, y) {
+    if (this.reduced || !this.W || !this.H) return null;
+    const rnd = mulberry32(
+      (this.seed ^ Math.imul(this.butterflies.length + 3, 0xc2b2ae35) ^ Math.floor(performance.now())) >>> 0,
+    );
+    const visitor = {
+      baseX: clamp(x + (rnd() - 0.5) * 22, 20, this.W - 20),
+      baseY: clamp(y - 14 + (rnd() - 0.5) * 16, 20, this.H - 20),
+      ax: 16 + rnd() * 24,
+      ay: 8 + rnd() * 14,
+      speed: 0.45 + rnd() * 0.3,
+      phase: rnd() * TAU,
+      size: Math.max(8, (9 + rnd() * 4) * clamp(Math.min(this.W, this.H) / 900, 0.6, 1.25)),
+      variant: Math.floor(rnd() * 4),
+      fromX: x < this.W / 2 ? -24 : this.W + 24,
+      fromY: clamp(y + (rnd() - 0.5) * 70, 20, this.H - 20),
+      arriveAt: performance.now() + 1500 + rnd() * 500,
+    };
+    this.butterflies.push(visitor);
+    if (this.butterflies.length > 8) {
+      const index = this.butterflies.findIndex((item) => item.fromX != null);
+      this.butterflies.splice(index >= 0 ? index : 0, 1);
+    }
+    return visitor;
   }
 
   vineProgress(vine, grown) {
@@ -341,18 +618,25 @@ export class Garden {
     const progress = this.reduced ? 1 : clamp(elapsed / GROW_MS, 0, 1);
     const grown = easeOutCubic(progress);
     const windAmp = this.reduced ? 0 : clamp(0.18 + this.wind / 45, 0.18, 1.25);
+    const growingExtra = this.vines.some(
+      (vine) => vine.bornAt && timestamp - vine.bornAt < (vine.growMs || EXTRA_GROW_MS),
+    );
 
-    if (progress >= 1) {
+    if (progress >= 1 && !growingExtra) {
       if (!this.stemsCache) this.renderStemsCache(theme);
       if (this.stemsCache) x.drawImage(this.stemsCache, 0, 0, W, H);
     } else {
-      for (const vine of this.vines) this.drawStem(x, vine, theme, grown);
+      for (const vine of this.vines) {
+        this.drawStem(x, vine, theme, this.vineLocal(vine, grown, timestamp));
+      }
     }
 
-    for (const vine of this.vines) this.drawLeaves(x, vine, theme, grown, timestamp, windAmp);
+    for (const vine of this.vines) {
+      this.drawLeaves(x, vine, theme, this.vineLocal(vine, grown, timestamp), timestamp, windAmp);
+    }
 
     for (const vine of this.vines) {
-      const local = this.vineProgress(vine, grown);
+      const local = this.vineLocal(vine, grown, timestamp);
       if (local <= 0) continue;
       const count = Math.max(2, Math.floor(local * vine.pts.length));
       for (const flower of vine.flowers) {
@@ -361,7 +645,18 @@ export class Garden {
         if (bloom <= 0) continue;
         const [px, py] = vine.pts[flower.i];
         const pulse = 1 + Math.sin(timestamp / 1400 + flower.ph) * 0.03 * (0.45 + windAmp);
-        this.drawFlower(x, px, py, flower.r * pulse, flower.rot, theme, flower.ph, bloom, flower.ci);
+        this.drawFlower(
+          x,
+          px,
+          py,
+          flower.r * pulse,
+          flower.rot,
+          theme,
+          flower.ph,
+          bloom,
+          flower.ci,
+          flower.species,
+        );
       }
     }
 
@@ -379,6 +674,38 @@ export class Garden {
         flower.ph,
         bloom,
         flower.ci,
+        flower.species,
+      );
+    }
+
+    for (const flower of this.extras) {
+      const bloom = this.reduced || !flower.bornAt ? 1 : clamp((timestamp - flower.bornAt) / 900, 0, 1);
+      const pulse = 1 + Math.sin(timestamp / 1300 + flower.ph) * 0.025 * (0.4 + windAmp);
+      x.save();
+      x.strokeStyle = theme.vine;
+      x.globalAlpha = 0.7;
+      x.lineWidth = Math.max(0.8, flower.r * 0.06);
+      x.beginPath();
+      x.moveTo(flower.x, flower.y + flower.stem * 1.7);
+      x.quadraticCurveTo(
+        flower.x + flower.stemBend * 12,
+        flower.y + flower.stem * 0.7,
+        flower.x,
+        flower.y + flower.r * 0.25,
+      );
+      x.stroke();
+      x.restore();
+      this.drawFlower(
+        x,
+        flower.x,
+        flower.y,
+        flower.r * pulse,
+        flower.rot,
+        theme,
+        flower.ph,
+        bloom,
+        flower.ci,
+        flower.species,
       );
     }
 
@@ -389,11 +716,10 @@ export class Garden {
     }
 
     // Build the stem-only cache after the first fully grown frame.
-    if (progress >= 1 && !this.stemsCache) this.renderStemsCache(theme);
+    if (progress >= 1 && !growingExtra && !this.stemsCache) this.renderStemsCache(theme);
   }
 
-  drawStem(ctx, vine, theme, grown) {
-    const local = this.vineProgress(vine, grown);
+  drawStem(ctx, vine, theme, local) {
     if (local <= 0) return;
     const count = Math.max(2, Math.floor(local * vine.pts.length));
     const pts = vine.pts;
@@ -435,8 +761,7 @@ export class Garden {
     this.stemsCache = canvas;
   }
 
-  drawLeaves(ctx, vine, theme, grown, timestamp, windAmp) {
-    const local = this.vineProgress(vine, grown);
+  drawLeaves(ctx, vine, theme, local, timestamp, windAmp) {
     if (local <= 0) return;
     const count = Math.max(2, Math.floor(local * vine.pts.length));
     ctx.save();
@@ -471,11 +796,12 @@ export class Garden {
     ctx.restore();
   }
 
-  drawFlower(ctx, px, py, radius, rotation, theme, phase, bloom, colorIndex) {
+  drawFlower(ctx, px, py, radius, rotation, theme, phase, bloom, colorIndex, species) {
     if (radius < 0.8 || bloom <= 0) return;
     const scale = easeOutBack(bloom);
     const r = radius * scale;
     const color = theme.flowers[Math.abs(colorIndex) % theme.flowers.length];
+    const kind = species || theme.bloom || 'rose';
     ctx.save();
     ctx.translate(px, py);
     ctx.rotate(rotation + phase * 0.15);
@@ -487,15 +813,17 @@ export class Garden {
       ctx.shadowBlur = Math.min(16, r * 0.7);
     }
 
-    if (theme.bloom === 'daisy') {
-      for (let i = 0; i < 9; i += 1) {
-        ctx.save();
-        ctx.rotate((TAU / 9) * i);
-        ctx.beginPath();
-        ctx.ellipse(r * 0.58, 0, r * 0.44, r * 0.17, 0, 0, TAU);
-        ctx.fill();
-        ctx.restore();
-      }
+    const petal = (angle, distance, rx, ry, tilt = 0) => {
+      ctx.save();
+      ctx.rotate(angle);
+      ctx.beginPath();
+      ctx.ellipse(distance, 0, rx, ry, tilt, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    };
+
+    if (kind === 'daisy') {
+      for (let i = 0; i < 9; i += 1) petal((TAU / 9) * i, r * 0.58, r * 0.44, r * 0.17);
       ctx.shadowBlur = 0;
       ctx.fillStyle = theme.center || '#ffcf33';
       ctx.beginPath();
@@ -509,6 +837,130 @@ export class Garden {
         ctx.arc(Math.cos(a) * r * 0.13, Math.sin(a) * r * 0.13, r * 0.025, 0, TAU);
         ctx.stroke();
       }
+    } else if (kind === 'tulip') {
+      for (let i = -1; i <= 1; i += 1) {
+        ctx.save();
+        ctx.rotate(i * 0.38);
+        ctx.beginPath();
+        ctx.ellipse(0, -r * 0.28, r * 0.31, r * 0.58, 0, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = theme.center || '#ffd34d';
+      ctx.beginPath();
+      ctx.ellipse(0, -r * 0.16, r * 0.12, r * 0.24, 0, 0, TAU);
+      ctx.fill();
+    } else if (kind === 'cosmos') {
+      for (let i = 0; i < 8; i += 1) {
+        const angle = (TAU / 8) * i;
+        ctx.save();
+        ctx.rotate(angle);
+        ctx.beginPath();
+        ctx.ellipse(r * 0.56, 0, r * 0.5, r * 0.13, 0, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = theme.center || '#ffd34d';
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.19, 0, TAU);
+      ctx.fill();
+    } else if (kind === 'sunflower') {
+      for (let i = 0; i < 16; i += 1) {
+        const angle = (TAU / 16) * i;
+        ctx.save();
+        ctx.rotate(angle);
+        ctx.beginPath();
+        ctx.ellipse(r * 0.62, 0, r * 0.48, r * 0.14, 0, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = theme.center || '#6b3f1d';
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.34, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,.28)';
+      for (let i = 0; i < 9; i += 1) {
+        const a = (TAU / 9) * i;
+        ctx.beginPath();
+        ctx.arc(Math.cos(a) * r * 0.2, Math.sin(a) * r * 0.2, r * 0.025, 0, TAU);
+        ctx.fill();
+      }
+    } else if (kind === 'lotus') {
+      for (let i = 0; i < 7; i += 1) {
+        const angle = (TAU / 7) * i;
+        ctx.save();
+        ctx.rotate(angle);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(r * 0.36, -r * 0.54, r * 0.9, 0);
+        ctx.quadraticCurveTo(r * 0.36, r * 0.54, 0, 0);
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = 0.8;
+      ctx.fillStyle = theme.center || '#ffe6a7';
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.22, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    } else if (kind === 'bell') {
+      for (let i = -2; i <= 2; i += 1) {
+        ctx.save();
+        ctx.rotate(i * 0.3);
+        ctx.beginPath();
+        ctx.moveTo(0, -r * 0.5);
+        ctx.quadraticCurveTo(r * 0.38, -r * 0.2, r * 0.25, r * 0.52);
+        ctx.quadraticCurveTo(0, r * 0.85, -r * 0.25, r * 0.52);
+        ctx.quadraticCurveTo(-r * 0.38, -r * 0.2, 0, -r * 0.5);
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = theme.center || '#ffe6a7';
+      ctx.beginPath();
+      ctx.arc(0, r * 0.3, r * 0.12, 0, TAU);
+      ctx.fill();
+    } else if (kind === 'chrysanthemum') {
+      for (let layer = 0; layer < 2; layer += 1) {
+        const count = layer === 0 ? 18 : 11;
+        const length = layer === 0 ? 0.9 : 0.58;
+        for (let i = 0; i < count; i += 1) {
+          const angle = (TAU / count) * i + layer * 0.16;
+          ctx.save();
+          ctx.rotate(angle);
+          ctx.beginPath();
+          ctx.ellipse(r * length * 0.55, 0, r * length * 0.45, r * 0.1, 0, 0, TAU);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = theme.center || '#ffd34d';
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.18, 0, TAU);
+      ctx.fill();
+    } else if (kind === 'camellia') {
+      for (let layer = 0; layer < 2; layer += 1) {
+        const count = layer === 0 ? 6 : 5;
+        for (let i = 0; i < count; i += 1) {
+          const angle = (TAU / count) * i + layer * 0.4;
+          ctx.save();
+          ctx.rotate(angle);
+          ctx.beginPath();
+          ctx.ellipse(layer === 0 ? r * 0.42 : r * 0.24, 0, r * 0.42, r * 0.3, 0, 0, TAU);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = theme.center || '#ffe6a7';
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.18, 0, TAU);
+      ctx.fill();
     } else {
       // Lobed rose silhouette with the spiral seen in the reference art.
       ctx.beginPath();
@@ -543,15 +995,25 @@ export class Garden {
 
   drawButterfly(ctx, butterfly, timestamp, theme, windAmp) {
     const t = timestamp / 1000;
-    const x =
+    let x =
       butterfly.baseX +
       Math.sin(t * butterfly.speed + butterfly.phase) * butterfly.ax +
       Math.sin(t * butterfly.speed * 2.3 + butterfly.phase) * butterfly.ax * 0.16;
-    const y =
+    let y =
       butterfly.baseY +
       Math.cos(t * butterfly.speed * 0.8 + butterfly.phase) * butterfly.ay +
       Math.sin(t * butterfly.speed * 1.9) * windAmp * 4;
-    const angle = Math.cos(t * butterfly.speed + butterfly.phase) * 0.35;
+    let angle = Math.cos(t * butterfly.speed + butterfly.phase) * 0.35;
+    if (butterfly.fromX != null && timestamp < butterfly.arriveAt) {
+      const start = butterfly.arriveAt - 1800;
+      const progress = easeOutCubic(clamp((timestamp - start) / 1800, 0, 1));
+      const fromY = butterfly.fromY ?? butterfly.baseY;
+      const dx = butterfly.baseX - butterfly.fromX;
+      const dy = butterfly.baseY - fromY;
+      x = butterfly.fromX + dx * progress + Math.sin(progress * Math.PI) * 16;
+      y = fromY + dy * progress - Math.sin(progress * Math.PI) * 22;
+      angle = Math.atan2(dy, dx) * 0.35;
+    }
     const flap = 0.22 + 0.78 * Math.abs(Math.sin(t * 8.5 + butterfly.phase));
     const wing = theme.flowers[butterfly.variant % theme.flowers.length];
     const wingAlt = theme.flowers[(butterfly.variant + 1) % theme.flowers.length];

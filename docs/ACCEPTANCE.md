@@ -103,7 +103,7 @@ Screenshots were taken from the production nginx container at 1440x900 and 360x8
 | City search and geolocation | Met     | City flow E2E; geolocation states unit tested                       |
 | Procedural garden           | Met     | Deterministic, bounded, rebuild under 50ms in unit test             |
 | Weather FX                  | Met     | 6x6 theme/weather browser smoke test and particle budgets           |
-| Themes and Auto             | Met     | Six themes, contrast check and Auto rules tested                    |
+| Themes and Auto             | Met     | Ten themes, contrast check and Auto rules tested                    |
 | Responsive 360px to desktop | Met     | 360px E2E and 1440x900 visual check                                 |
 | Accessibility               | Partial | Automated labels/reduced motion/contrast pass; Lighthouse pending   |
 | Performance budgets         | Partial | JS gzip budget met; FPS and Lighthouse field scores not measured    |

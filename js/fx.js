@@ -3,7 +3,7 @@
 
 import { clamp, mulberry32, randomSeed } from './rand.js';
 
-const COUNTS = { clear: 34, cloud: 7, fog: 6, rain: 230, storm: 340, snow: 150, stars: 140 };
+const COUNTS = { clear: 34, cloud: 7, fog: 6, drizzle: 90, rain: 230, storm: 340, snow: 150 };
 
 export class FX {
   constructor(canvas, options = {}) {
@@ -21,10 +21,11 @@ export class FX {
     this.particles = [];
     this.flash = 0;
     this.nextBolt = 4;
+    this.boltX = 0.5;
+    this.boltSeed = 0;
     this.seed = options.seed ?? randomSeed();
     this.rnd = mulberry32(this.seed);
     this.lean = 0;
-    this.stars = [];
   }
 
   resize() {
@@ -63,29 +64,18 @@ export class FX {
     const rnd = mulberry32(this.seed);
     const quality = (this.lowPower ? 0.5 : 1) * (this.reduced ? 0.28 : 1);
     const { W, H } = this;
-    const baseKind = this.kind === 'clear' && !this.day ? 'stars' : this.kind;
-    const count = Math.round((COUNTS[baseKind] ?? 0) * quality);
+    const baseKind = this.kind;
+    const count = baseKind === 'clear' && !this.day ? 0 : Math.round((COUNTS[baseKind] ?? 0) * quality);
     this.particles = [];
 
-    if (baseKind === 'stars') {
-      this.stars = Array.from({ length: count }, () => ({
-        x: rnd() * W,
-        y: rnd() * H * 0.88,
-        r: 0.5 + rnd() * 1.7,
-        phase: rnd() * Math.PI * 2,
-        speed: 0.5 + rnd() * 1.4,
-      }));
-      return;
-    }
-
     for (let i = 0; i < count; i += 1) {
-      if (baseKind === 'rain' || baseKind === 'storm') {
+      if (baseKind === 'rain' || baseKind === 'storm' || baseKind === 'drizzle') {
         this.particles.push({
           x: rnd() * (W + 200) - 100,
           y: rnd() * H,
           z: 0.35 + rnd() * 0.95,
-          speed: 520 + rnd() * 540,
-          len: 10 + rnd() * 18,
+          speed: baseKind === 'drizzle' ? 260 + rnd() * 220 : 520 + rnd() * 540,
+          len: baseKind === 'drizzle' ? 5 + rnd() * 8 : 10 + rnd() * 18,
         });
       } else if (baseKind === 'snow') {
         this.particles.push({
@@ -127,12 +117,11 @@ export class FX {
     x.clearRect(0, 0, W, H);
 
     if (this.kind === 'clear' && this.day) this.drawSunAndPollen(x, d, timestamp, light);
-    else if (this.kind === 'clear' && !this.day) this.drawNight(x, timestamp);
 
     if (this.kind === 'cloud') this.drawClouds(x, d, light, false);
     if (this.kind === 'fog') this.drawClouds(x, d, light, true);
 
-    if (this.kind === 'rain' || this.kind === 'storm') {
+    if (this.kind === 'rain' || this.kind === 'storm' || this.kind === 'drizzle') {
       this.drawRain(x, d, light);
       if (this.kind === 'storm' && !this.reduced) this.drawLightning(x, d);
     }
@@ -141,14 +130,8 @@ export class FX {
   }
 
   drawSunAndPollen(x, dt, timestamp, light) {
+    // The sky layer owns the sun disc; this layer only carries daylight pollen.
     const { W, H } = this;
-    const warm = x.createRadialGradient(W * 0.84, H * 0.02, 0, W * 0.84, H * 0.02, H * 0.55);
-    warm.addColorStop(0, light ? 'rgba(255, 218, 140, 0.28)' : 'rgba(255, 217, 138, 0.24)');
-    warm.addColorStop(0.45, 'rgba(255, 208, 120, 0.07)');
-    warm.addColorStop(1, 'rgba(255, 208, 120, 0)');
-    x.fillStyle = warm;
-    x.fillRect(0, 0, W, H);
-
     x.save();
     for (const p of this.particles) {
       p.x += dt * (p.speed + this.wind * 0.55) * p.z;
@@ -162,39 +145,6 @@ export class FX {
       x.fill();
     }
     x.restore();
-  }
-
-  drawNight(x, timestamp) {
-    const { W, H } = this;
-    const moon = x.createRadialGradient(W * 0.82, H * 0.14, 0, W * 0.82, H * 0.14, H * 0.22);
-    moon.addColorStop(0, 'rgba(220, 235, 255, 0.15)');
-    moon.addColorStop(1, 'rgba(220, 235, 255, 0)');
-    x.fillStyle = moon;
-    x.fillRect(0, 0, W, H);
-    x.fillStyle = 'rgba(236, 245, 255, 0.74)';
-    x.beginPath();
-    x.arc(W * 0.82, H * 0.14, Math.min(W, H) * 0.014, 0, Math.PI * 2);
-    x.fill();
-
-    for (const star of this.stars) {
-      const alpha = 0.18 + 0.82 * Math.abs(Math.sin(timestamp / 1200 + star.phase));
-      x.globalAlpha = alpha;
-      x.fillStyle = star.r > 1.6 ? 'rgba(255, 222, 200, 0.95)' : '#ffffff';
-      x.beginPath();
-      x.arc(star.x, star.y, star.r, 0, Math.PI * 2);
-      x.fill();
-      if (star.r > 1.9) {
-        x.strokeStyle = 'rgba(255,255,255,.22)';
-        x.lineWidth = 0.7;
-        x.beginPath();
-        x.moveTo(star.x - star.r * 3, star.y);
-        x.lineTo(star.x + star.r * 3, star.y);
-        x.moveTo(star.x, star.y - star.r * 3);
-        x.lineTo(star.x, star.y + star.r * 3);
-        x.stroke();
-      }
-    }
-    x.globalAlpha = 1;
   }
 
   drawClouds(x, dt, light, fog) {
@@ -225,17 +175,22 @@ export class FX {
 
   drawRain(x, dt, light) {
     const { W, H } = this;
+    const drizzle = this.kind === 'drizzle';
     const color =
       this.kind === 'storm'
         ? light
           ? 'rgba(50, 78, 112, .5)'
           : 'rgba(190, 218, 255, .62)'
-        : light
-          ? 'rgba(65, 100, 145, .4)'
-          : 'rgba(165, 198, 240, .48)';
+        : drizzle
+          ? light
+            ? 'rgba(65, 100, 145, .26)'
+            : 'rgba(180, 208, 245, .32)'
+          : light
+            ? 'rgba(65, 100, 145, .4)'
+            : 'rgba(165, 198, 240, .48)';
     const horizontal = this.lean * 10;
     x.strokeStyle = color;
-    x.lineWidth = 1.1;
+    x.lineWidth = drizzle ? 0.75 : 1.1;
     x.beginPath();
     for (const p of this.particles) {
       const length = p.len * p.z;
@@ -258,18 +213,22 @@ export class FX {
     if (this.nextBolt <= 0) {
       this.flash = 1;
       this.nextBolt = 3 + this.rnd() * 6;
+      // Pick the bolt position once per strike; re-rolling it every frame made
+      // the branch jump around the screen while the flash faded.
+      this.boltX = 0.2 + this.rnd() * 0.6;
+      this.boltSeed = this.rnd() * 100;
     }
     if (this.flash <= 0) return;
     x.fillStyle = `rgba(255,255,255,${this.flash * 0.32})`;
     x.fillRect(0, 0, W, H);
     // A cropped branch makes the flash read as lightning without strobing.
-    const bx = W * (0.2 + this.rnd() * 0.6);
+    const bx = W * this.boltX;
     x.strokeStyle = `rgba(255,255,255,${this.flash * 0.7})`;
     x.lineWidth = 1.4;
     x.beginPath();
     x.moveTo(bx, 0);
     for (let i = 1; i < 5; i += 1) {
-      x.lineTo(bx + Math.sin(i * 2.2 + this.seed) * 28, (H * 0.12 * i) / 4);
+      x.lineTo(bx + Math.sin(i * 2.2 + this.boltSeed) * 28, (H * 0.12 * i) / 4);
     }
     x.stroke();
     this.flash -= dt / 0.33;

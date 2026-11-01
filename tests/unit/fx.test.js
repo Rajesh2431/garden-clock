@@ -46,13 +46,16 @@ describe('FX particle budgets', () => {
     expect(fx.particles).toHaveLength(34);
 
     fx.set('clear', false);
-    expect(fx.stars).toHaveLength(140);
+    expect(fx.particles).toHaveLength(0);
 
     fx.set('cloud', true);
     expect(fx.particles).toHaveLength(7);
 
     fx.set('fog', true);
     expect(fx.particles).toHaveLength(6);
+
+    fx.set('drizzle', true);
+    expect(fx.particles).toHaveLength(90);
 
     fx.set('rain', true);
     expect(fx.particles).toHaveLength(230);
@@ -71,7 +74,7 @@ describe('FX particle budgets', () => {
     fx.set('storm', true);
     expect(fx.particles).toHaveLength(170);
     fx.set('clear', false);
-    expect(fx.stars).toHaveLength(70);
+    expect(fx.particles).toHaveLength(0);
   });
 
   it('uses a calm particle budget with reduced motion', () => {
@@ -79,7 +82,7 @@ describe('FX particle budgets', () => {
     fx.set('rain', true);
     expect(fx.particles).toHaveLength(64);
     fx.set('clear', false);
-    expect(fx.stars).toHaveLength(39);
+    expect(fx.particles).toHaveLength(0);
   });
 
   it('couples the rain slant to wind speed', () => {
@@ -97,13 +100,27 @@ describe('FX rendering', () => {
   it('draws every weather and theme combination', () => {
     const fx = buildFx();
     const timestamp = performance.now();
-    for (const kind of ['clear', 'cloud', 'fog', 'rain', 'storm', 'snow']) {
+    for (const kind of ['clear', 'cloud', 'fog', 'drizzle', 'rain', 'storm', 'snow']) {
       for (const day of [true, false]) {
         for (const theme of Object.values(THEMES)) {
           fx.set(kind, day, 18, theme);
           expect(() => fx.draw(0.016, timestamp, theme)).not.toThrow();
         }
       }
+    }
+  });
+
+  it('keeps a lightning bolt in one place while its flash fades', () => {
+    const fx = buildFx();
+    fx.set('storm', false, 10);
+    fx.nextBolt = 0.01;
+    fx.draw(0.05, performance.now(), THEMES.noir);
+    expect(fx.flash).toBeGreaterThan(0);
+    const { boltX, boltSeed } = fx;
+    for (let frame = 1; frame < 5; frame += 1) {
+      fx.draw(0.05, performance.now() + frame * 50, THEMES.noir);
+      expect(fx.boltX).toBe(boltX);
+      expect(fx.boltSeed).toBe(boltSeed);
     }
   });
 
@@ -130,6 +147,13 @@ describe('FX rendering', () => {
       expect(particle.y).toBeGreaterThanOrEqual(-100);
       expect(particle.y).toBeLessThanOrEqual(fx.H + 24);
     }
+  });
+
+  it('leaves stars and the moon to the sky layer', () => {
+    const fx = buildFx();
+    fx.set('clear', false);
+    expect(fx.stars).toBeUndefined();
+    expect(fx.moon).toBeUndefined();
   });
 
   it('does nothing without a canvas context', () => {

@@ -11,7 +11,7 @@
     <title>Garden Clock — a living clock</title>
     <meta
       name="description"
-      content="A full-screen live clock whose digits sit inside a procedurally grown garden of vines and roses that reacts to real weather and local time."
+      content="A full-screen live clock inside a continuously growing garden with seasonal flowers, weather, and a sky of sun, moon and stars."
     />
 
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -30,7 +30,7 @@
     <meta property="og:title" content="Garden Clock — a living clock" />
     <meta
       property="og:description"
-      content="A live clock wrapped in royal-blue vines and red spiral roses, growing with the real weather."
+      content="A live clock in a continuously growing garden with seasonal flowers, a sun, moon and stars, and real weather."
     />
     <meta property="og:image" content="%BASE_URL%og.png" />
     <meta property="og:image:width" content="1200" />
@@ -57,6 +57,7 @@
     <a class="skip-link" href="#city">Skip to controls</a>
 
     <main id="stage" aria-label="Garden Clock scene">
+      <canvas id="sky" aria-hidden="true"></canvas>
       <canvas id="garden" aria-hidden="true"></canvas>
       <canvas id="fx" aria-hidden="true"></canvas>
       <div class="sheen" aria-hidden="true"></div>
@@ -77,6 +78,7 @@
         <div id="w-temp">--°</div>
         <p id="w-desc">Loading weather…</p>
         <p id="w-meta"></p>
+        <p id="sky-note" class="sky-note"></p>
         <p id="w-stale" hidden></p>
         <p id="sim-badge" hidden></p>
         <button id="w-retry" type="button" hidden>Retry weather</button>
@@ -125,12 +127,18 @@
       </label>
 
       <label class="field">
+        <span>Season</span>
+        <select id="season" title="Choose a garden season"></select>
+      </label>
+
+      <label class="field">
         <span>Weather</span>
         <select id="sim" title="Preview a weather condition">
           <option value="">Live</option>
           <option value="clear">Clear</option>
           <option value="cloud">Cloudy</option>
           <option value="fog">Fog</option>
+          <option value="drizzle">Drizzle</option>
           <option value="rain">Rain</option>
           <option value="storm">Thunderstorm</option>
           <option value="snow">Snow</option>
@@ -190,12 +198,13 @@
       </button>
 
       <span id="sync" role="status" aria-live="polite">syncing…</span>
-      <span id="hint" aria-hidden="true">F full screen · H hide</span>
+      <span id="hint" aria-hidden="true">Click or tap to bloom · F full · H hide</span>
     </nav>
 
     <p class="visually-hidden">
-      Keyboard shortcuts: F toggles full screen, H hides or shows the controls, R grows a new garden. The
-      clock is decorative and does not announce every second.
+      Keyboard shortcuts: F toggles full screen, H hides or shows the controls, R grows a new garden. Click
+      anywhere in the garden to bloom a flower and call a butterfly. The clock is decorative and does not
+      announce every second.
     </p>
 
     <div id="toast" role="status" aria-live="polite"></div>

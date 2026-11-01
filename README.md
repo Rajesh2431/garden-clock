@@ -2,18 +2,22 @@
 
 A full-screen live clock whose digits sit inside a procedural garden. Vines grow in from the edges, roses and daisies bloom around the clock, and the garden follows the real weather and time of day for the selected city.
 
-The reference look is black, royal-blue vines and red spiral roses. Five more themes are included, along with a weather simulator for demos and tests.
+The reference look is black, royal-blue vines and red spiral roses. Nine more themes are included, along with a seasonal flower mix, a sky of sun, moon and stars, and a weather simulator for demos and tests.
 
 ## Features
 
 - Live clock with seconds, 12/24-hour mode and the selected city's IANA timezone.
 - Latency-compensated internet time sync, with a Cloudflare timestamp fallback and a final local-clock fallback.
-- Live weather from Open-Meteo with no API key: clear, cloudy, fog, rain, thunderstorm, snow, day and night.
-- Procedural garden: tapered vines, pointed leaves, spiral roses, daisies, flower clusters, butterflies and idle wind sway.
-- Six themes plus Auto, which follows weather and time of day.
-- Weather FX layer: sun glow, pollen, stars, clouds, fog, rain, lightning and snow.
+- Live weather from Open-Meteo with no API key: clear, cloudy, fog, drizzle, rain, thunderstorm, snow, day and night.
+- Procedural garden: tapered vines, pointed leaves, nine flower species, flower clusters, butterflies and idle wind sway.
+- Ten themes plus Auto, which follows weather and time of day (and the clock alone while weather is unavailable).
+- Seasons: spring, summer, autumn and winter flower mixes, chosen automatically from the city's date and hemisphere or set by hand.
+- Sky layer: sun by time of day, a seeded star field, the date's zodiac constellation with a highlighted star, and the real moon phase.
+- Weather FX layer: pollen, clouds, fog, drizzle, rain, lightning and snow.
+- A garden that keeps growing: a new short vine every 18 seconds (up to 28), saved per seed and caught up after time away.
+- Click or tap anywhere to bloom a flower and call a butterfly. Clicked blooms survive theme, season and resize changes.
 - City search and browser geolocation.
-- Seeded gardens, share links, PNG export and hourly regrowth.
+- Seeded gardens, share links and PNG export.
 - Reduced-motion support, keyboard shortcuts, kiosk mode and optional screen wake lock.
 - Installable PWA with an offline app shell and cached weather.
 - Unit, browser and build checks in GitHub Actions.
@@ -98,7 +102,7 @@ saving time is handled by the browser rather than by hard-coded offsets.
 
 `js/weather.js` requests current conditions and daily sunrise/sunset from Open-Meteo. Location
 comes from the saved city, then browser geolocation, then Chennai as the default. WMO weather
-codes are grouped into six visual kinds; unknown codes fall back to cloudy.
+codes are grouped into seven visual kinds; unknown codes fall back to cloudy.
 
 Weather is cached in `localStorage` for ten minutes. A stale cached reading is shown with an
 `Offline` label when a refresh fails. The production service worker also caches recent Open-Meteo
@@ -113,14 +117,34 @@ bottom-right of the clock, and one or two butterflies follow slow sine paths.
 
 The same seed and viewport produce the same garden. Changing theme or weather does not change
 the geometry; regrowing creates a new seed and updates `?seed=`. The garden is rebuilt after
-resize and after web fonts load.
+resize and after web fonts load. A rebuild with the same seed and layout keeps the garden's age,
+so a theme or season change recolours it without replaying the growth animation. Clicked blooms
+are kept for the same seed and move proportionally after a resize.
+
+Every 18 seconds `growOne()` adds a short edge vine with one or two flowers, seeded by the garden
+seed and the growth index, up to 28 extra vines. The count is stored in `localStorage` per seed,
+and time spent away (a closed or hidden tab) adds one vine per 20 minutes, up to four at a time.
+
+### Seasons and sky
+
+`js/almanac.js` holds pure helpers: time-of-day phase (morning 05–12, afternoon 12–17, evening
+17–21, night), meteorological seasons flipped for the southern hemisphere, the moon phase from
+the synodic month, and the zodiac constellation for the date with one "star of the day". Dates
+are taken from the selected city's wall clock (`wallDate()` in `js/clock.js`), so the season and
+constellation change at local midnight rather than UTC midnight.
+
+`js/sky.js` draws the bottom canvas: the sun for day phases, and the star field, constellation
+and moon for evening and night, dimmed by cloud, rain, fog and snow. Choosing one of the four
+time themes (Morning Dew, Afternoon Sun, Evening Glow, Starry Night) also sets the sky phase.
 
 ### Themes and FX
 
-`js/themes.js` contains six palettes and the Auto rules. Theme changes write CSS custom
+`js/themes.js` contains ten palettes and the Auto rules. Theme changes write CSS custom
 properties, update the meta theme colour and rebuild the canvas. Digits are checked against
 their background at 4.5:1 or better. A first visit starts on Auto; choose Noir Roses for the
-black, blue and red reference look.
+black, blue and red reference look. Auto uses Noir Roses for rain, drizzle and storms, Glass
+Marble for snow, Forest for fog, and the time themes otherwise. Until weather arrives, or if it
+fails, Auto follows the local hour on its own.
 
 `js/fx.js` draws a separate canvas above the garden. Particle counts are capped at 340 and
 halved on low-core devices. Reduced motion lowers the counts further, removes butterflies,
@@ -143,6 +167,10 @@ All configuration is optional. Copy `.env.example` to `.env` if needed.
 | `VITE_BASE`               | Vite base path. Use `/repo-name/` for a GitHub Pages project site.        |
 | `VITE_ANALYTICS_ENDPOINT` | Optional analytics collector. Sends theme/weather events, no coordinates. |
 | `VITE_ERROR_ENDPOINT`     | Optional error collector. Sends message, source, line and stack.          |
+
+Builds on Vercel (where `VERCEL=1`) also inject Vercel Web Analytics and Speed Insights. Both
+load from the same origin, so the CSP needs no change. Local, Docker and Pages builds leave them
+out.
 
 If you enable either endpoint, add its origin to the `connect-src` directive in the CSP used by
 your host (`nginx.conf` and `vercel.json`). The default CSP allows only self, Google Fonts,
@@ -215,14 +243,18 @@ are included.
 ```text
 index.html                 markup, metadata, accessible labels
 css/style.css              layout, themes, glass treatment, motion preferences
-js/main.js                 state, UI wiring, sync/weather refresh, share/export
-js/clock.js                time parsers, NTP-lite sync, timezone formatting
+js/main.js                 state, UI wiring, sync/weather refresh, growth, share
+js/export.js               PNG export (flattens canvases, redraws clock text)
+js/clock.js                time parsers, NTP-lite sync, timezone formatting, wallDate
 js/weather.js              Open-Meteo, geocoding, WMO mapping, cache
-js/garden.js               seeded vines, leaves, flowers, clusters, butterflies
+js/almanac.js              phases, seasons, moon phase, zodiac constellations
+js/sky.js                  sun, star field, constellation and moon canvas
+js/garden.js               seeded vines, flowers, clusters, butterflies, idle growth
 js/fx.js                   weather particles and lightning
 js/themes.js               palettes, contrast helpers, Auto rules
 scripts/generate-assets.sh icon rasterisation
 scripts/capture-og.mjs     reproducible Open Graph screenshot
+scripts/visual-check.mjs   screenshots of every theme/season (needs `npm run preview`)
 tests/unit/                Vitest suites
 tests/e2e/                 Playwright suite
 docs/                      design, research, deployment and acceptance notes
@@ -241,16 +273,19 @@ Further documentation:
   every second.
 - Every control has a visible label or an accessible name, and focus rings are kept.
 - Reduced motion removes growth, disables lightning and lowers particle counts.
-- The page uses `prefers-color-scheme` before weather arrives when the theme is Auto.
+- Auto follows the local hour before weather arrives, so the palette always matches the time.
+- Season, sky and theme checks run once a minute rather than on every clock tick.
 - Device pixel ratio is capped at 2, particle counts are bounded, and animation pauses when the
   tab is hidden.
-- The production build is roughly 44 KB of JavaScript and 11 KB of CSS before gzip.
+- The production build is roughly 68 KB of JavaScript (24 KB gzip) and 13 KB of CSS.
 
 ## Privacy
 
 The app has no backend and uses no API keys. Coordinates stay in the browser except when sent to
 Open-Meteo for a forecast. The chosen city and last weather reading are stored in `localStorage`.
-The optional analytics and error endpoints are disabled unless configured. Cloudflare's trace
+The optional analytics and error endpoints are disabled unless configured; when enabled, events
+carry UI state only (theme, weather kind, season, flower species, seed and growth count), never
+coordinates or city names. Vercel Analytics runs only on Vercel builds. Cloudflare's trace
 endpoint is contacted only if the primary time API fails.
 
 ## License

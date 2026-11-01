@@ -206,6 +206,45 @@ function zoneName(formatter, date) {
 }
 
 /**
+ * Return a Date whose UTC fields equal the wall-clock date and time in
+ * `timeZone`. The almanac reads UTC fields, so passing this value makes the
+ * season, constellation and star field follow the city's own calendar day
+ * instead of Greenwich's. Do not use it as a real instant (e.g. moon phase).
+ */
+export function wallDate(timeZone, timestamp = now()) {
+  const zone = safeZone(timeZone);
+  const key = `${zone}:wall`;
+  let formatter = formatCache.get(key);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+    });
+    formatCache.set(key, formatter);
+  }
+  const values = {};
+  for (const part of formatter.formatToParts(new Date(timestamp))) {
+    if (part.type !== 'literal') values[part.type] = Number(part.value);
+  }
+  return new Date(
+    Date.UTC(
+      values.year,
+      values.month - 1,
+      values.day,
+      (values.hour || 0) % 24,
+      values.minute || 0,
+      values.second || 0,
+    ),
+  );
+}
+
+/**
  * Return the wall-clock parts for a timezone at a given instant.
  * DST and historical offsets are handled by Intl.
  */

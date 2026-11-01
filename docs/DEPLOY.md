@@ -138,7 +138,7 @@ Then in a browser:
 
 1. The clock shows the selected city's time and the correct date.
 2. Weather resolves, or the cached/offline label appears.
-3. Theme selection and all six weather simulations render without console errors.
+3. Theme selection and all seven weather simulations render without console errors.
 4. Regrow changes `?seed=` and the garden.
 5. Share copies a URL; Save downloads a PNG.
 6. The manifest is detected in DevTools and the app can be installed.

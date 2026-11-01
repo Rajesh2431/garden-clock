@@ -1,6 +1,95 @@
 // Themes drive both CSS custom properties and the canvas painter.
 
+import { timePhase } from './almanac.js';
+
 export const THEMES = {
+  morning: {
+    name: 'Morning Dew',
+    bg: '#eef6ff',
+    bg2: '#fff8ed',
+    stage: 'linear-gradient(180deg, #d8ecff 0%, #f4f9ff 55%, #fff0db 100%)',
+    vine: '#4d7bd6',
+    leaf: '#5f9e6a',
+    flowers: ['#ff7a9c', '#ffb45c', '#7b7cf0', '#ffe06a'],
+    swirl: 'rgba(255,255,255,.88)',
+    bloom: 'tulip',
+    center: '#ffd34d',
+    digit: '#14263d',
+    glow: '0 0 22px rgba(255,255,255,.65)',
+    ui: '#14263d',
+    muted: '#52657e',
+    panel: 'rgba(255,255,255,.58)',
+    border: 'rgba(255,255,255,.86)',
+    accent: '#ff8fa8',
+    contrastBg: '#eef6ff',
+    light: true,
+    seasonal: true,
+  },
+  afternoon: {
+    name: 'Afternoon Sun',
+    bg: '#fff4dc',
+    bg2: '#eaf6ff',
+    stage: 'linear-gradient(180deg, #cfeaff 0%, #fff7e4 58%, #ffe4b4 100%)',
+    vine: '#2f7a4d',
+    leaf: '#4a9c62',
+    flowers: ['#ff6b6b', '#ffd166', '#4dabf7', '#f783ac'],
+    swirl: 'rgba(255,255,255,.82)',
+    bloom: 'sunflower',
+    center: '#7a4a22',
+    digit: '#17332d',
+    glow: '0 0 20px rgba(255,255,255,.55)',
+    ui: '#17332d',
+    muted: '#4f665e',
+    panel: 'rgba(255,255,255,.56)',
+    border: 'rgba(255,255,255,.84)',
+    accent: '#ffb84d',
+    contrastBg: '#fff4dc',
+    light: true,
+    seasonal: true,
+  },
+  evening: {
+    name: 'Evening Glow',
+    bg: '#1a0d2e',
+    bg2: '#e07a5f',
+    stage: 'linear-gradient(180deg, #150b2c 0%, #512866 54%, #d97661 100%)',
+    vine: '#ffcf70',
+    leaf: '#ff9e5e',
+    flowers: ['#ff5d8f', '#ffd166', '#c77dff', '#ff8c42'],
+    swirl: 'rgba(255,255,255,.7)',
+    bloom: 'cosmos',
+    center: '#ffe6a8',
+    digit: '#fff4ea',
+    glow: '0 0 24px rgba(255,170,120,.4)',
+    ui: '#fff4ea',
+    muted: 'rgba(255,244,234,.64)',
+    panel: 'rgba(35,15,52,.4)',
+    border: 'rgba(255,255,255,.22)',
+    accent: '#ffcf70',
+    contrastBg: '#1a0d2e',
+    sunset: true,
+    seasonal: true,
+  },
+  night: {
+    name: 'Starry Night',
+    bg: '#040817',
+    bg2: '#0b1733',
+    stage: 'radial-gradient(115% 100% at 50% 34%, #0b1733 0%, #040817 68%, #02040a 100%)',
+    vine: '#8fb8ff',
+    leaf: '#6d8ed8',
+    flowers: ['#f4f7ff', '#9ad1ff', '#c9a7ff', '#ffe6a7'],
+    swirl: 'rgba(226,240,255,.78)',
+    bloom: 'lotus',
+    center: '#ffe6a7',
+    digit: '#f5f8ff',
+    glow: '0 0 24px rgba(150,190,255,.35)',
+    ui: '#f5f8ff',
+    muted: 'rgba(245,248,255,.62)',
+    panel: 'rgba(8,16,38,.55)',
+    border: 'rgba(190,215,255,.2)',
+    accent: '#8fb8ff',
+    contrastBg: '#040817',
+    seasonal: true,
+  },
   noir: {
     name: 'Noir Roses',
     bg: '#000000',
@@ -20,6 +109,7 @@ export const THEMES = {
     border: 'rgba(255,255,255,.16)',
     accent: '#3355ff',
     contrastBg: '#000000',
+    seasonal: false,
   },
   glass: {
     name: 'Glass Marble',
@@ -42,6 +132,7 @@ export const THEMES = {
     contrastBg: '#eef2f6',
     glass: true,
     light: true,
+    seasonal: true,
   },
   sakura: {
     name: 'Sakura Night',
@@ -62,6 +153,7 @@ export const THEMES = {
     border: 'rgba(255,255,255,.18)',
     accent: '#ff9fbc',
     contrastBg: '#1b0f17',
+    seasonal: true,
   },
   neon: {
     name: 'Neon Bloom',
@@ -83,6 +175,7 @@ export const THEMES = {
     accent: '#00e5ff',
     contrastBg: '#05040f',
     neon: true,
+    seasonal: true,
   },
   sunset: {
     name: 'Sunset',
@@ -104,6 +197,7 @@ export const THEMES = {
     accent: '#ffd166',
     contrastBg: '#2b1055',
     sunset: true,
+    seasonal: true,
   },
   forest: {
     name: 'Forest',
@@ -124,6 +218,7 @@ export const THEMES = {
     border: 'rgba(255,255,255,.16)',
     accent: '#6fcf6f',
     contrastBg: '#0d1f14',
+    seasonal: true,
   },
 };
 
@@ -134,19 +229,32 @@ export function getTheme(key) {
   return THEMES[key] || THEMES.noir;
 }
 
-// Auto theme rules from the project brief.
+// Auto follows the clock and the weather. Rain keeps the reference noir palette;
+// snow and fog keep their own moods; clear and cloudy skies use the time of day.
 export function autoTheme(kind, isDay, hour) {
-  if (!isDay) return kind === 'rain' || kind === 'storm' ? 'noir' : 'neon';
-  if (kind === 'rain' || kind === 'storm') return 'noir';
+  const wet = kind === 'rain' || kind === 'storm' || kind === 'drizzle';
+  if (wet) return 'noir';
   if (kind === 'snow') return 'glass';
   if (kind === 'fog') return 'forest';
-  if (hour >= 17 || hour < 7) return 'sunset';
-  return kind === 'clear' ? 'glass' : 'sakura';
+  const phase = timePhase(hour);
+  if (!isDay && phase !== 'evening') return 'night';
+  if (phase === 'morning') return 'morning';
+  if (phase === 'afternoon') return 'afternoon';
+  if (phase === 'evening') return 'evening';
+  return 'night';
 }
 
-export function themeForState({ theme, kind, isDay, hour, hasWeather, prefersDark }) {
+// Rough daylight window used until real sunrise/sunset data arrives.
+export function isDaytimeHour(hour) {
+  const h = ((Number(hour) % 24) + 24) % 24;
+  return h >= 6 && h < 18;
+}
+
+export function themeForState({ theme, kind, isDay, hour, hasWeather }) {
   if (theme && theme !== 'auto' && THEMES[theme]) return theme;
-  if (!hasWeather) return prefersDark ? 'noir' : 'glass';
+  // Without weather (still loading, offline or failed), follow the clock alone
+  // so a failed request never leaves a morning palette on screen at midnight.
+  if (!hasWeather) return autoTheme('clear', isDaytimeHour(hour), hour);
   return autoTheme(kind, isDay, hour);
 }
 

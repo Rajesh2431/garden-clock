@@ -14,6 +14,7 @@ export const KIND_LABELS = {
   clear: 'Clear',
   cloud: 'Cloudy',
   fog: 'Fog',
+  drizzle: 'Drizzle',
   rain: 'Rain',
   storm: 'Thunderstorm',
   snow: 'Snow',
@@ -61,7 +62,8 @@ export function kindOf(code) {
   if (c <= 1) return 'clear';
   if (c <= 3) return 'cloud';
   if (c === 45 || c === 48) return 'fog';
-  if ((c >= 51 && c <= 67) || (c >= 80 && c <= 82)) return 'rain';
+  if (c >= 51 && c <= 57) return 'drizzle';
+  if ((c >= 61 && c <= 67) || (c >= 80 && c <= 82)) return 'rain';
   if ((c >= 71 && c <= 77) || c === 85 || c === 86) return 'snow';
   if (c >= 95) return 'storm';
   return 'cloud';

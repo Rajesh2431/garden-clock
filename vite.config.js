@@ -5,6 +5,11 @@ const base = process.env.VITE_BASE || '/';
 
 export default defineConfig({
   base,
+  define: {
+    // Vercel sets VERCEL=1 during its builds. Keeping the flag out of local and
+    // self-hosted builds avoids noisy 404s for the platform-only scripts.
+    __VERCEL__: JSON.stringify(Boolean(process.env.VERCEL)),
+  },
   // Vitest reads this section when it loads the Vite config.
   test: {
     environment: 'jsdom',

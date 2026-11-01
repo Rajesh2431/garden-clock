@@ -67,11 +67,18 @@ describe('WMO code mapping', () => {
     [3, 'cloud'],
     [45, 'fog'],
     [48, 'fog'],
-    [51, 'rain'],
+    [51, 'drizzle'],
+    [53, 'drizzle'],
+    [55, 'drizzle'],
+    [56, 'drizzle'],
+    [57, 'drizzle'],
     [61, 'rain'],
+    [63, 'rain'],
+    [65, 'rain'],
     [66, 'rain'],
     [67, 'rain'],
     [80, 'rain'],
+    [81, 'rain'],
     [82, 'rain'],
     [71, 'snow'],
     [73, 'snow'],
@@ -94,9 +101,11 @@ describe('WMO code mapping', () => {
 
   it('labels known and unknown weather', () => {
     expect(label(0)).toBe('Clear sky');
+    expect(label(51)).toBe('Light drizzle');
     expect(label(61)).toBe('Light rain');
     expect(label(95)).toBe('Thunderstorm');
     expect(label(1234)).toBe('Unknown weather');
+    expect(KIND_LABELS.drizzle).toBe('Drizzle');
     expect(KIND_LABELS.storm).toBe('Thunderstorm');
   });
 });

@@ -4,6 +4,7 @@ test.use({ reducedMotion: 'reduce' });
 
 const FIXED_TIME = new Date('2026-10-27T11:30:42+05:30');
 const FIXED_UTC = '2026-10-27T06:00:42.0000000';
+const GROWTH_KEY = 'garden-clock:growth:v1';
 
 const CHENNAI_WEATHER = {
   timezone: 'Asia/Kolkata',
@@ -109,8 +110,11 @@ async function mockApis(page, options = {}) {
 }
 
 async function openApp(page, options = {}) {
-  const { url = '/', weather, timeStatus, geocoding, viewport } = options;
+  const { url = '/', weather, timeStatus, geocoding, viewport, storage } = options;
   if (viewport) await page.setViewportSize(viewport);
+  if (storage) {
+    await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), storage);
+  }
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'geolocation', {
       configurable: true,
@@ -170,8 +174,19 @@ test('every theme and simulated weather renders without page errors', async ({ p
   page.on('pageerror', (error) => errors.push(error));
   await openApp(page);
 
-  const themes = ['noir', 'glass', 'sakura', 'neon', 'sunset', 'forest'];
-  const kinds = ['clear', 'cloud', 'fog', 'rain', 'storm', 'snow'];
+  const themes = [
+    'morning',
+    'afternoon',
+    'evening',
+    'night',
+    'noir',
+    'glass',
+    'sakura',
+    'neon',
+    'sunset',
+    'forest',
+  ];
+  const kinds = ['clear', 'cloud', 'fog', 'drizzle', 'rain', 'storm', 'snow'];
   for (const theme of themes) {
     await page.selectOption('#theme', theme);
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
@@ -182,6 +197,82 @@ test('every theme and simulated weather renders without page errors', async ({ p
   }
 
   expect(errors).toEqual([]);
+});
+
+test('offers the full theme, season and weather catalogue', async ({ page }) => {
+  await openApp(page);
+
+  await expect(page.locator('#theme option')).toHaveCount(11);
+  await expect(page.locator('#season option')).toHaveCount(5);
+  await expect(page.locator('#sim option')).toHaveCount(8);
+  await expect(page.locator('body')).toHaveAttribute('data-season', 'autumn');
+  await expect(page.locator('#sky-note')).toContainText('Scorpius');
+  await expect(page.locator('#sky-note')).toContainText('Autumn garden');
+  await expect(page.locator('#sky')).toBeVisible();
+});
+
+test('time themes drive the sky and its daily constellation', async ({ page }) => {
+  await openApp(page);
+
+  await page.selectOption('#theme', 'night');
+  await expect(page.locator('#sky-note')).toContainText('Night');
+  await page.selectOption('#sim', 'clear');
+  const nightPixels = await page.locator('#sky').evaluate((canvas) => {
+    const context = canvas.getContext('2d');
+    const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let lit = 0;
+    for (let i = 3; i < data.length; i += 4) if (data[i] > 0) lit += 1;
+    return lit;
+  });
+  expect(nightPixels).toBeGreaterThan(100);
+
+  await page.selectOption('#theme', 'evening');
+  await expect(page.locator('#sky-note')).toContainText('Evening');
+  await page.selectOption('#theme', 'morning');
+  await expect(page.locator('#sky-note')).toContainText('Morning');
+});
+
+test('the season selector changes the garden and its label', async ({ page }) => {
+  await openApp(page);
+  await expect(page.locator('body')).toHaveAttribute('data-season', 'autumn');
+
+  await page.selectOption('#season', 'summer');
+  await expect(page.locator('body')).toHaveAttribute('data-season', 'summer');
+  await expect(page.locator('#sky-note')).toContainText('Summer garden');
+
+  await page.selectOption('#season', 'winter');
+  await expect(page.locator('body')).toHaveAttribute('data-season', 'winter');
+  await expect(page.locator('#sky-note')).toContainText('Winter garden');
+
+  await page.selectOption('#season', 'auto');
+  await expect(page.locator('body')).toHaveAttribute('data-season', 'autumn');
+});
+
+test('restores and continuously grows a saved garden', async ({ page }) => {
+  test.setTimeout(30_000);
+  await openApp(page, {
+    url: '/?seed=1234&debug=1',
+    storage: {
+      key: GROWTH_KEY,
+      value: { seed: 1234, count: 5, at: FIXED_TIME.getTime() },
+    },
+  });
+  const debug = page.locator('#debug');
+  await expect(debug).toContainText('growth 5/28');
+
+  await page.clock.runFor(18_500);
+  await expect(debug).toContainText('growth 6/28');
+  await page.clock.runFor(18_500);
+  await expect(debug).toContainText('growth 7/28');
+});
+
+test('clicking the scene blooms a flower in reduced motion', async ({ page }) => {
+  await openApp(page, { url: '/?seed=1234&debug=1' });
+  const debug = page.locator('#debug');
+
+  await page.locator('#stage').click({ position: { x: 720, y: 480 } });
+  await expect(debug).toContainText('blooms 1');
+  await expect(debug).toContainText('visitors 0');
 });
 
 test('toggles 12-hour time and seconds', async ({ page }) => {
@@ -275,6 +366,21 @@ test('keyboard shortcut H hides and shows the controls', async ({ page }) => {
   await expect(page.locator('#controls')).toBeVisible();
 });
 
+test('shortcuts still work while a control button has focus', async ({ page }) => {
+  await openApp(page);
+
+  await page.focus('#regrow');
+  await page.keyboard.press('h');
+  await expect(page.locator('#controls')).toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#controls')).toBeVisible();
+
+  // Typing in the city field must not trigger shortcuts.
+  await page.focus('#city');
+  await page.keyboard.type('h');
+  await expect(page.locator('#controls')).toBeVisible();
+});
+
 test('mobile layout fits a 360px viewport', async ({ page }) => {
   await openApp(page, { viewport: { width: 360, height: 800 } });
 
@@ -293,6 +399,20 @@ test('mobile layout fits a 360px viewport', async ({ page }) => {
 
   await expect(page.locator('#time')).toBeVisible();
   await expect(page.locator('#w-temp')).toBeVisible();
+});
+
+test.describe('animated garden', () => {
+  test.use({ reducedMotion: 'no-preference' });
+
+  test('clicking the scene blooms a flower and calls a butterfly', async ({ page }) => {
+    await openApp(page, { url: '/?seed=1234&debug=1' });
+    const debug = page.locator('#debug');
+    await expect(debug).toContainText('visitors 2');
+
+    await page.locator('#stage').click({ position: { x: 720, y: 480 } });
+    await expect(debug).toContainText('blooms 1');
+    await expect(debug).toContainText('visitors 3');
+  });
 });
 
 test('ships the manifest, icons and service worker', async ({ request }) => {

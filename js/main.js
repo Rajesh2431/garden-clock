@@ -1,5 +1,5 @@
 import { THEMES, THEME_KEYS, applyTheme, getTheme, themeForState } from './themes.js';
-import { parts, now, syncInfo, syncTime, SYNC_INTERVAL_MS } from './clock.js';
+import { parts, now, syncInfo, syncTime, wallDate, SYNC_INTERVAL_MS } from './clock.js';
 import {
   DEFAULT_LOCATION,
   KIND_LABELS,
@@ -11,18 +11,37 @@ import {
   locate,
   searchCities,
 } from './weather.js';
-import { Garden } from './garden.js';
+import { Garden, MAX_EXTRA_GROWTH } from './garden.js';
 import { FX } from './fx.js';
-import { randomSeed } from './rand.js';
+import { Sky } from './sky.js';
+import {
+  PHASES,
+  SEASON_KEYS,
+  SEASONS,
+  constellationForDate,
+  moonInfo,
+  resolveSeason,
+  timePhase,
+} from './almanac.js';
+import { clamp, randomSeed } from './rand.js';
+import { composeScene, downloadCanvas } from './export.js';
 import { initMonitoring, track } from './monitor.js';
+import { inject } from '@vercel/analytics';
+import { injectSpeedInsights } from '@vercel/speed-insights';
+
+const GROWTH_INTERVAL_MS = 18_000;
+const GROWTH_OFFLINE_MS = 20 * 60 * 1000;
+const TIME_THEME_PHASES = new Set(['morning', 'afternoon', 'evening', 'night']);
 
 const $ = (selector, root = document) => root.querySelector(selector);
 
 const KEYS = {
   theme: 'garden-clock:theme',
+  season: 'garden-clock:season',
   h12: 'garden-clock:h12',
   secs: 'garden-clock:secs',
   loc: 'garden-clock:loc',
+  growth: 'garden-clock:growth:v1',
 };
 
 const store = {
@@ -45,7 +64,6 @@ const store = {
 
 const params = new URLSearchParams(location.search);
 const reducedQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
 
 const readSeedParam = () => {
   const raw = params.get('seed');
@@ -57,7 +75,8 @@ const readSeedParam = () => {
 const savedLoc = store.get(KEYS.loc, null);
 const initialLoc =
   savedLoc && Number.isFinite(savedLoc.lat) && Number.isFinite(savedLoc.lon) ? savedLoc : null;
-const urlSeed = readSeedParam();
+const regrowOnLoad = params.get('regrow') === '1';
+const urlSeed = regrowOnLoad ? null : readSeedParam();
 const lowPower = !!(
   (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) ||
   (navigator.deviceMemory && navigator.deviceMemory <= 4)
@@ -65,6 +84,7 @@ const lowPower = !!(
 
 const els = {
   stage: $('#stage'),
+  sky: $('#sky'),
   garden: $('#garden'),
   fx: $('#fx'),
   controls: $('#controls'),
@@ -81,6 +101,7 @@ const els = {
   temp: $('#w-temp'),
   desc: $('#w-desc'),
   meta: $('#w-meta'),
+  skyNote: $('#sky-note'),
   stale: $('#w-stale'),
   simBadge: $('#sim-badge'),
   retry: $('#w-retry'),
@@ -89,6 +110,7 @@ const els = {
   cityForm: $('#city-form'),
   locate: $('#locate'),
   theme: $('#theme'),
+  season: $('#season'),
   sim: $('#sim'),
   h12: $('#h12'),
   secs: $('#secs'),
@@ -103,6 +125,7 @@ const els = {
 
 const state = {
   theme: store.get(KEYS.theme, 'auto'),
+  seasonPref: store.get(KEYS.season, 'auto'),
   h12: !!store.get(KEYS.h12, false),
   secs: store.get(KEYS.secs, true),
   loc: initialLoc,
@@ -112,16 +135,32 @@ const state = {
   wind: 0,
   code: 0,
   hasWeather: false,
+  temp: null,
   sim: '',
   seed: urlSeed ?? randomSeed(),
-  fixedSeed: urlSeed !== null,
   themeKey: null,
   current: getTheme('noir'),
   hour24: new Date().getHours(),
+  minute24: new Date().getMinutes(),
+  phase: timePhase(new Date().getHours(), new Date().getMinutes()),
+  seasonKey: resolveSeason(
+    'auto',
+    wallDate(initialLoc?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone),
+    initialLoc?.lat ?? 0,
+  ),
+  dateKey: '',
+  moon: moonInfo(new Date()),
+  constellation: constellationForDate(
+    wallDate(initialLoc?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone),
+  ),
+  growth: 0,
+  builtSeason: null,
+  hiddenAt: 0,
   lowPower,
   reduced: reducedQuery.matches,
   lastSecond: -1,
   lastClockKey: '',
+  lastMinuteKey: '',
   lastTitle: '',
   weatherBusy: false,
   syncBusy: false,
@@ -133,6 +172,7 @@ const state = {
   kiosk: params.get('kiosk') === '1',
 };
 if (state.theme !== 'auto' && !THEMES[state.theme]) state.theme = 'auto';
+if (state.seasonPref !== 'auto' && !SEASON_KEYS.includes(state.seasonPref)) state.seasonPref = 'auto';
 
 const garden = new Garden(els.garden, {
   reducedMotion: state.reduced,
@@ -142,6 +182,10 @@ const fx = new FX(els.fx, {
   reducedMotion: state.reduced,
   lowPower: state.lowPower,
   seed: state.seed,
+});
+const sky = new Sky(els.sky, {
+  reducedMotion: state.reduced,
+  lowPower: state.lowPower,
 });
 
 let rafId = 0;
@@ -176,10 +220,6 @@ function releaseWakeLock() {
   wakeLock = null;
 }
 
-function prefersDark() {
-  return darkQuery.matches;
-}
-
 function effectiveKind() {
   return state.sim || state.kind;
 }
@@ -191,7 +231,6 @@ function resolveThemeKey() {
     isDay: state.isDay,
     hour: state.hour24,
     hasWeather: state.hasWeather,
-    prefersDark: prefersDark(),
   });
 }
 
@@ -225,17 +264,103 @@ function applyWeatherFX() {
   fx.set(effectiveKind(), state.isDay, state.wind, state.current);
   garden.setWind(state.wind);
   updateSimBadge();
+  updateSky();
+}
+
+function skyPhase() {
+  // Selecting a time theme changes the whole scene, including the sky. Other
+  // themes keep the real local phase so weather and daylight still agree.
+  return TIME_THEME_PHASES.has(state.themeKey) ? state.themeKey : state.phase;
+}
+
+function updateSky() {
+  if (!sky) return;
+  const instant = now();
+  sky.set({
+    phase: skyPhase(),
+    kind: effectiveKind(),
+    theme: state.current,
+    // Wall-clock date for the city's calendar day; real instant for the moon.
+    date: wallDate(state.tz, instant),
+    instant: new Date(instant),
+    latitude: state.loc?.lat ?? 0,
+    longitude: state.loc?.lon ?? 0,
+    season: state.seasonKey,
+  });
+}
+
+function updateSkyNote() {
+  if (!els.skyNote) return;
+  const moonPercent = Math.round(state.moon.illumination * 100);
+  const labelPhase = skyPhase();
+  els.skyNote.textContent = [
+    PHASES[labelPhase]?.label || 'Sky',
+    `${state.moon.name} ${moonPercent}%`,
+    [state.constellation.name, state.constellation.special?.name].filter(Boolean).join(' · '),
+    `${SEASONS[state.seasonKey]?.label || ''} garden`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+function updateSeasonAndSky() {
+  const instant = now();
+  // Season and zodiac follow the selected city's calendar day, not UTC's.
+  const localDate = wallDate(state.tz, instant);
+  const season = resolveSeason(state.seasonPref, localDate, state.loc?.lat ?? 0);
+  const phase = timePhase(state.hour24, state.minute24);
+  const changed = season !== state.seasonKey || phase !== state.phase;
+  state.seasonKey = season;
+  state.phase = phase;
+  state.moon = moonInfo(new Date(instant));
+  state.constellation = constellationForDate(localDate);
+  document.body.dataset.season = season;
+  document.body.dataset.phase = phase;
+  updateSkyNote();
+  updateSky();
+  return changed;
+}
+
+function restoreGrowth() {
+  const stored = store.get(KEYS.growth, null);
+  if (stored && stored.seed === state.seed) {
+    state.growth = clamp(Math.floor(Number(stored.count) || 0), 0, MAX_EXTRA_GROWTH);
+    const elapsed = Math.max(0, Date.now() - (Number(stored.at) || Date.now()));
+    state.growth = Math.min(
+      MAX_EXTRA_GROWTH,
+      state.growth + Math.min(4, Math.floor(elapsed / GROWTH_OFFLINE_MS)),
+    );
+  } else {
+    state.growth = 0;
+  }
+}
+
+function persistGrowth() {
+  store.set(KEYS.growth, { seed: state.seed, count: state.growth, at: Date.now() });
+}
+
+function growGarden() {
+  if (state.growth >= MAX_EXTRA_GROWTH) return;
+  const before = garden.extraGrowth;
+  const vine = garden.growOne();
+  if (!vine || garden.extraGrowth === before) return;
+  state.growth = garden.extraGrowth;
+  persistGrowth();
+  track('garden_grow', { seed: state.seed, growth: state.growth });
+  if (state.debug) updateDebug();
 }
 
 function refreshTheme({ rebuild = true, resetFx = true } = {}) {
   const key = resolveThemeKey();
   const changed = key !== state.themeKey;
+  const seasonChanged = state.builtSeason !== state.seasonKey;
   state.themeKey = key;
   state.current = getTheme(key);
   applyTheme(state.current, key);
   if (resetFx) applyWeatherFX();
-  if (changed && rebuild) rebuildGarden();
-  return changed;
+  updateSkyNote();
+  if (rebuild && (changed || seasonChanged)) rebuildGarden();
+  return changed || seasonChanged;
 }
 
 function boxOfClock() {
@@ -266,14 +391,25 @@ function setSeedParam() {
 function rebuildGarden({ freshSeed = false, announce = false } = {}) {
   if (freshSeed) {
     state.seed = randomSeed();
-    state.fixedSeed = false;
+    state.growth = 0;
     setSeedParam();
+    persistGrowth();
   }
-  garden.build(boxOfClock(), state.seed, state.current);
+  garden.build(boxOfClock(), state.seed, state.current, {
+    season: state.seasonKey,
+    growth: state.growth,
+  });
+  state.builtSeason = state.seasonKey;
   garden.setWind(state.wind);
   if (announce) toast('A new garden is growing');
   if (state.debug) updateDebug();
-  track('garden_build', { seed: state.seed, theme: state.themeKey, kind: effectiveKind() });
+  track('garden_build', {
+    seed: state.seed,
+    theme: state.themeKey,
+    kind: effectiveKind(),
+    season: state.seasonKey,
+    growth: state.growth,
+  });
 }
 
 function regrow(options = {}) {
@@ -283,8 +419,11 @@ function regrow(options = {}) {
 function initLayout() {
   garden.resize();
   fx.resize();
+  sky.resize();
   garden.setReduced(state.reduced);
   fx.setReduced(state.reduced);
+  sky.setReduced(state.reduced);
+  updateSeasonAndSky();
   rebuildGarden();
   applyWeatherFX();
   updateClock(true);
@@ -329,7 +468,10 @@ function updateWeatherUI(weather, loc) {
   els.retry.hidden = !weather.stale;
   if (document.activeElement !== els.city) els.city.value = place;
 
-  state.hour24 = parts(state.tz, false).hour24;
+  const localNow = parts(state.tz, false);
+  state.hour24 = localNow.hour24;
+  state.minute24 = Number(localNow.mm) || 0;
+  updateSeasonAndSky();
   refreshTheme();
   updateClock(true);
   track('weather', {
@@ -393,7 +535,7 @@ async function loadWeather({ force = false } = {}) {
       const located = await locate();
       state.loc = located || { ...DEFAULT_LOCATION };
       store.set(KEYS.loc, state.loc);
-      if (state.loc.timezone && !state.tz) state.tz = state.loc.timezone;
+      if (state.loc.timezone) state.tz = state.loc.timezone;
       updateClock(true);
     }
     const weather = await fetchWeatherCached(state.loc.lat, state.loc.lon, { force });
@@ -443,10 +585,9 @@ function updateClock(force = false) {
   state.lastSecond = second;
   const p = parts(state.tz, state.h12);
   const key = `${p.hh}:${p.mm}:${p.ss}:${p.meridiem}:${p.date}:${p.tzName}:${state.secs}`;
-  const hourChanged = state.hour24 !== p.hour24;
-  const wasInitialised = state.lastClockKey !== '';
   state.lastClockKey = key;
   state.hour24 = p.hour24;
+  state.minute24 = Number(p.mm) || 0;
 
   els.hh.textContent = p.hh;
   els.mm.textContent = p.mm;
@@ -457,20 +598,24 @@ function updateClock(force = false) {
   els.time.setAttribute('aria-label', `${p.hh}:${p.mm}:${p.ss} ${p.meridiem} ${p.tzName}`.trim());
   els.weather.setAttribute('aria-label', `Local weather in ${placeName(state.loc)}`);
 
-  if (p.mm !== state.lastTitle) {
-    state.lastTitle = p.mm;
+  if (`${p.hh}:${p.mm}` !== state.lastTitle) {
+    state.lastTitle = `${p.hh}:${p.mm}`;
     document.title = `${p.hh}:${p.mm} · Garden Clock`;
   }
 
-  if (hourChanged && wasInitialised) {
+  // Season, sky and theme change at most once a minute; skip them on the other
+  // 59 ticks. A forced update (location, toggles, wake) always refreshes.
+  const minuteKey = `${p.hour24}:${p.mm}:${p.date}:${p.timeZone}`;
+  if (!force && minuteKey === state.lastMinuteKey) return;
+  state.lastMinuteKey = minuteKey;
+
+  updateSeasonAndSky();
+  if (state.theme === 'auto') {
     const keyNow = resolveThemeKey();
-    if (state.theme === 'auto' && keyNow !== state.themeKey) {
-      refreshTheme();
-    } else if (state.fixedSeed) {
-      rebuildGarden();
-    } else {
-      regrow({ announce: false });
-    }
+    if (keyNow !== state.themeKey || state.builtSeason !== state.seasonKey) refreshTheme();
+  } else if (state.builtSeason !== state.seasonKey) {
+    // A manual theme still follows the calendar; midnight can change the season.
+    rebuildGarden();
   }
 }
 
@@ -483,7 +628,7 @@ function buildThemeOptions() {
   els.theme.replaceChildren();
   const auto = document.createElement('option');
   auto.value = 'auto';
-  auto.textContent = 'Auto (weather)';
+  auto.textContent = 'Auto (time + weather)';
   els.theme.append(auto);
   for (const key of THEME_KEYS) {
     const option = document.createElement('option');
@@ -494,10 +639,26 @@ function buildThemeOptions() {
   els.theme.value = state.theme;
 }
 
+function buildSeasonOptions() {
+  els.season.replaceChildren();
+  const auto = document.createElement('option');
+  auto.value = 'auto';
+  auto.textContent = 'Auto season';
+  els.season.append(auto);
+  for (const key of SEASON_KEYS) {
+    const option = document.createElement('option');
+    option.value = key;
+    option.textContent = SEASONS[key].label;
+    els.season.append(option);
+  }
+  els.season.value = state.seasonPref;
+}
+
 function attachUI() {
   els.h12.checked = state.h12;
   els.secs.checked = state.secs;
   els.sim.value = state.sim;
+  els.season.value = state.seasonPref;
   setToggleClasses();
 
   els.theme.addEventListener('change', () => {
@@ -505,6 +666,14 @@ function attachUI() {
     store.set(KEYS.theme, state.theme);
     refreshTheme();
     track('theme_choice', { theme: state.theme });
+  });
+
+  els.season.addEventListener('change', () => {
+    state.seasonPref = els.season.value;
+    store.set(KEYS.season, state.seasonPref);
+    updateSeasonAndSky();
+    refreshTheme();
+    track('season_choice', { season: state.seasonPref });
   });
 
   els.sim.addEventListener('change', () => {
@@ -530,6 +699,8 @@ function attachUI() {
   });
 
   els.regrow.addEventListener('click', () => {
+    state.growth = 0;
+    persistGrowth();
     regrow();
     track('regrow', { seed: state.seed });
   });
@@ -547,9 +718,19 @@ function attachUI() {
   });
 
   els.stage.addEventListener('click', (event) => {
-    if (event.target.closest('aside, button, input, select, a, label')) return;
-    regrow();
-    track('regrow', { seed: state.seed, source: 'stage' });
+    if (event.target.closest('aside, button, input, select, a, label, nav')) return;
+    const rect = els.stage.getBoundingClientRect();
+    const flower = garden.bloomAt(event.clientX - rect.left, event.clientY - rect.top, {
+      season: state.seasonKey,
+    });
+    if (flower) {
+      track('bloom_click', {
+        species: flower.species,
+        season: state.seasonKey,
+        phase: state.phase,
+      });
+      if (state.debug) updateDebug();
+    }
   });
 
   document.addEventListener('keydown', handleKeydown);
@@ -564,9 +745,6 @@ function attachUI() {
   });
 
   reducedQuery.addEventListener('change', handleMotionPreference);
-  darkQuery.addEventListener('change', () => {
-    if (state.theme === 'auto' && !state.hasWeather) refreshTheme();
-  });
 
   if (window.ResizeObserver) {
     const observer = new ResizeObserver(() => {
@@ -691,104 +869,27 @@ async function shareGarden() {
   }
 }
 
-function saveGarden() {
+async function saveGarden() {
   try {
-    const stageRect = els.stage.getBoundingClientRect();
-    const width = Math.round(stageRect.width);
-    const height = Math.round(stageRect.height);
-    if (!width || !height) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(height * dpr);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    const theme = state.current;
-    const gradient = ctx.createLinearGradient(0, 0, 0, height);
-    gradient.addColorStop(0, theme.bg2 || theme.bg);
-    gradient.addColorStop(1, theme.bg);
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, width, height);
-    ctx.drawImage(els.garden, 0, 0, width, height);
-    ctx.drawImage(els.fx, 0, 0, width, height);
-
-    const timeRect = els.time.getBoundingClientRect();
-    const clockX = timeRect.left - stageRect.left + timeRect.width / 2;
-    const clockY = timeRect.top - stageRect.top + timeRect.height * 0.55;
-    const family = getComputedStyle(document.body).fontFamily || 'sans-serif';
-    const fontSize =
-      Number.parseFloat(getComputedStyle(els.time).fontSize) || Math.min(width * 0.18, height * 0.3);
-    const p = parts(state.tz, state.h12);
-    ctx.fillStyle = theme.digit;
-    ctx.textBaseline = 'alphabetic';
-    ctx.textAlign = 'left';
-    ctx.font = `200 ${fontSize}px ${family}`;
-    const main = `${p.hh}:${p.mm}`;
-    const mainWidth = ctx.measureText(main).width;
-    const seconds = state.secs ? p.ss : '';
-    const smallSize = fontSize * 0.2;
-    ctx.font = `200 ${smallSize}px ${family}`;
-    const secondsWidth = seconds ? ctx.measureText(seconds).width : 0;
-    const meridiemWidth = p.meridiem ? ctx.measureText(p.meridiem).width + smallSize * 0.4 : 0;
-    const gap = fontSize * 0.12;
-    const total = mainWidth + (seconds ? gap + secondsWidth : 0) + meridiemWidth;
-    let x = clockX - total / 2;
-    ctx.font = `200 ${fontSize}px ${family}`;
-    ctx.fillText(main, x, clockY);
-    x += mainWidth + gap;
-    ctx.font = `200 ${smallSize}px ${family}`;
-    ctx.globalAlpha = 0.7;
-    if (seconds) {
-      ctx.fillText(seconds, x, clockY);
-      x += secondsWidth + smallSize * 0.4;
+    const canvas = composeScene({
+      stage: els.stage,
+      timeEl: els.time,
+      layers: [els.sky, els.garden, els.fx],
+      theme: state.current,
+      clock: parts(state.tz, state.h12),
+      showSeconds: state.secs,
+      weather: state.hasWeather
+        ? { temp: state.temp, text: `${label(state.code)} · ${placeName(state.loc)}` }
+        : null,
+    });
+    if (!canvas) return;
+    const saved = await downloadCanvas(canvas, `garden-clock-${state.seed}.png`);
+    if (!saved) {
+      toast('Could not save this garden');
+      return;
     }
-    if (p.meridiem) {
-      ctx.fillText(p.meridiem, x, clockY);
-    }
-    ctx.globalAlpha = 1;
-
-    const dateSize = Math.max(10, fontSize * 0.12);
-    ctx.font = `300 ${dateSize}px ${family}`;
-    ctx.textAlign = 'center';
-    ctx.fillStyle = theme.digit;
-    ctx.globalAlpha = 0.78;
-    if (typeof ctx.letterSpacing === 'string') {
-      ctx.letterSpacing = `${dateSize * 0.28}px`;
-    }
-    ctx.fillText(`${p.date.toUpperCase()} · ${p.tzName}`, clockX, clockY + dateSize * 2.6);
-    ctx.globalAlpha = 1;
-
-    if (state.hasWeather) {
-      const wx = Math.max(22, width * 0.025);
-      const wy = Math.max(22, height * 0.035);
-      ctx.textAlign = 'left';
-      ctx.fillStyle = theme.digit;
-      ctx.font = `200 ${Math.max(22, width * 0.034)}px ${family}`;
-      ctx.fillText(`${state.temp}°C`, wx, wy + Math.max(22, width * 0.034));
-      ctx.font = `300 ${Math.max(11, width * 0.012)}px ${family}`;
-      ctx.globalAlpha = 0.82;
-      ctx.fillText(`${label(state.code)} · ${placeName(state.loc)}`, wx, wy + Math.max(34, width * 0.048));
-      ctx.globalAlpha = 1;
-    }
-
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        toast('Could not save this garden');
-        return;
-      }
-      const link = document.createElement('a');
-      const url = URL.createObjectURL(blob);
-      link.href = url;
-      link.download = `garden-clock-${state.seed}.png`;
-      document.body.append(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 4000);
-      toast('Garden saved');
-      track('save_png', { seed: state.seed, theme: state.themeKey });
-    }, 'image/png');
+    toast('Garden saved');
+    track('save_png', { seed: state.seed, theme: state.themeKey });
   } catch (error) {
     console.warn('[GardenClock] PNG export failed:', error);
     toast('Could not save this garden');
@@ -809,15 +910,19 @@ function updateFullscreenState() {
   els.fullscreen.title = document.fullscreenElement ? 'Exit full screen (F)' : 'Toggle full screen (F)';
 }
 
+// Letter shortcuts should still work after clicking a button or checkbox; only
+// fields where letters mean something (text entry, select type-ahead) opt out.
+function isTypingTarget(target) {
+  if (!target) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName;
+  if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (tag !== 'INPUT') return false;
+  return !['checkbox', 'radio', 'button', 'submit', 'reset'].includes(target.type);
+}
+
 function handleKeydown(event) {
-  const tag = event.target?.tagName;
-  if (
-    ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(tag) ||
-    event.target?.isContentEditable ||
-    event.metaKey ||
-    event.ctrlKey ||
-    event.altKey
-  ) {
+  if (isTypingTarget(event.target) || event.metaKey || event.ctrlKey || event.altKey) {
     return;
   }
   const key = event.key.toLowerCase();
@@ -830,6 +935,8 @@ function handleKeydown(event) {
     toast(hidden ? 'Controls hidden · press H to show' : 'Controls shown');
   } else if (key === 'r') {
     event.preventDefault();
+    state.growth = 0;
+    persistGrowth();
     regrow();
   } else if (event.key === 'Escape' && els.controls.classList.contains('hidden')) {
     els.controls.classList.remove('hidden');
@@ -840,17 +947,32 @@ function handleMotionPreference(event) {
   state.reduced = event.matches;
   garden.setReduced(state.reduced);
   fx.setReduced(state.reduced);
+  sky.setReduced(state.reduced);
   applyWeatherFX();
   if (!state.reduced) rebuildGarden();
 }
 
+function catchUpGrowth(hiddenFor) {
+  if (hiddenFor < GROWTH_OFFLINE_MS || state.growth >= MAX_EXTRA_GROWTH) return false;
+  const steps = Math.min(4, Math.floor(hiddenFor / GROWTH_OFFLINE_MS));
+  if (!steps) return false;
+  state.growth = Math.min(MAX_EXTRA_GROWTH, state.growth + steps);
+  persistGrowth();
+  rebuildGarden();
+  return true;
+}
+
 function handleVisibility() {
   if (document.hidden) {
+    state.hiddenAt = Date.now();
     if (rafId) cancelAnimationFrame(rafId);
     rafId = 0;
     releaseWakeLock();
     return;
   }
+  const hiddenFor = state.hiddenAt ? Date.now() - state.hiddenAt : 0;
+  state.hiddenAt = 0;
+  catchUpGrowth(hiddenFor);
   lastFrame = performance.now();
   lastRender = 0;
   updateClock(true);
@@ -874,7 +996,9 @@ function updateDebug() {
   els.debug.hidden = false;
   els.debug.textContent = [
     `seed ${state.seed} · ${state.themeKey}`,
-    `${effectiveKind()} ${state.isDay ? 'day' : 'night'} · wind ${Math.round(state.wind)} km/h`,
+    `${effectiveKind()} ${state.isDay ? 'day' : 'night'} · ${state.phase} · wind ${Math.round(state.wind)} km/h`,
+    `${SEASONS[state.seasonKey]?.label || state.seasonKey} · ${state.moon.name} · growth ${state.growth}/${MAX_EXTRA_GROWTH}`,
+    `blooms ${garden.extras.length} · visitors ${garden.butterflies.length}`,
     `${fps} fps · build ${garden.buildMs.toFixed(1)} ms`,
     `offset ${Math.round(info.offset)} ms · ${info.source || 'local'}`,
   ].join('\n');
@@ -892,6 +1016,7 @@ function frame(timestamp) {
   lastFrame = timestamp;
   lastRender = timestamp;
 
+  sky.draw(timestamp);
   garden.draw(state.current, timestamp);
   fx.draw(dt, timestamp, state.current);
 
@@ -914,18 +1039,32 @@ function startLoop() {
   }
 }
 
+function initAnalytics() {
+  if (!__VERCEL__) return;
+  try {
+    inject();
+    injectSpeedInsights();
+  } catch (error) {
+    console.warn('[GardenClock] Vercel analytics unavailable:', error?.message || error);
+  }
+}
+
 function init() {
+  initAnalytics();
   initMonitoring();
   buildThemeOptions();
+  buildSeasonOptions();
   attachUI();
+  if (regrowOnLoad) {
+    // state.seed is already fresh; record it before the first (only) build.
+    state.growth = 0;
+    setSeedParam();
+    persistGrowth();
+  } else {
+    restoreGrowth();
+  }
   refreshTheme({ rebuild: false, resetFx: false });
   initLayout();
-  if (params.get('regrow') === '1') {
-    state.seed = randomSeed();
-    state.fixedSeed = false;
-    setSeedParam();
-    rebuildGarden();
-  }
   syncClock();
   loadWeather();
   updateClock(true);
@@ -946,6 +1085,9 @@ function init() {
       loadWeather({ force: true });
     }
   }, 60_000);
+  window.setInterval(() => {
+    if (!document.hidden) growGarden();
+  }, GROWTH_INTERVAL_MS);
   track('app_open', { theme: state.theme });
 }
 

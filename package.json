@@ -1,6 +1,6 @@
 {
   "name": "garden-clock",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "A live clock wrapped in a procedurally grown garden that reacts to real weather and local time.",
@@ -39,5 +39,9 @@
     "vitest": "^5.0.5",
     "workbox-build": "^7.4.1",
     "workbox-window": "^7.4.1"
+  },
+  "dependencies": {
+    "@vercel/analytics": "^2.0.1",
+    "@vercel/speed-insights": "^2.0.0"
   }
 }
