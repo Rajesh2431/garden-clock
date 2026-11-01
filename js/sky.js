@@ -5,6 +5,10 @@
 import { clamp, mulberry32 } from './rand.js';
 import { constellationForDate, dateKey, hashString, moonInfo, PHASES } from './almanac.js';
 
+// Share of the full particle/star budget per quality tier, and pixel-ratio caps.
+const QUALITY = { high: 1, medium: 0.75, low: 0.5 };
+const MAX_DPR = { high: 2, medium: 1.5, low: 1 };
+
 const TAU = Math.PI * 2;
 
 export class Sky {
@@ -23,7 +27,8 @@ export class Sky {
     this.longitude = 0;
     this.season = 'spring';
     this.reduced = !!options.reducedMotion;
-    this.lowPower = !!options.lowPower;
+    this.quality = QUALITY[options.quality] ? options.quality : options.lowPower ? 'medium' : 'high';
+    this.lowPower = this.quality !== 'high';
     this.stars = [];
     this.constellation = null;
     this.key = '';
@@ -33,7 +38,7 @@ export class Sky {
     const rect = this.c?.getBoundingClientRect?.() || { width: 800, height: 600 };
     this.W = Math.max(1, rect.width || 800);
     this.H = Math.max(1, rect.height || 600);
-    const dpr = clamp(globalThis.devicePixelRatio || 1, 1, 2);
+    const dpr = clamp(globalThis.devicePixelRatio || 1, 1, MAX_DPR[this.quality] || 2);
     this.dpr = dpr;
     const pixelWidth = Math.max(1, Math.round(this.W * dpr));
     const pixelHeight = Math.max(1, Math.round(this.H * dpr));
@@ -56,10 +61,19 @@ export class Sky {
   }
 
   setLowPower(value) {
-    this.lowPower = !!value;
+    this.setQuality(value ? 'medium' : 'high');
+  }
+
+  /** Switch quality tier. Call resize() afterwards so the pixel ratio applies. */
+  setQuality(quality) {
+    if (!QUALITY[quality]) return false;
+    const changed = quality !== this.quality;
+    this.quality = quality;
+    this.lowPower = quality !== 'high';
     this.key = '';
     this.stars = [];
     this.constellation = null;
+    return changed;
   }
 
   set(options = {}) {
@@ -76,7 +90,7 @@ export class Sky {
       latitude.toFixed(2),
       longitude.toFixed(2),
       season,
-      this.lowPower ? 'low' : 'full',
+      this.quality,
       this.reduced ? 'calm' : 'live',
     ].join('|');
     this.phase = phase;
@@ -97,7 +111,7 @@ export class Sky {
 
   build() {
     const { W, H } = this;
-    const quality = (this.lowPower ? 0.5 : 1) * (this.reduced ? 0.72 : 1);
+    const quality = QUALITY[this.quality] * (this.reduced ? 0.72 : 1);
     const count = Math.max(18, Math.round(132 * quality));
     const rnd = mulberry32(
       hashString(`${dateKey(this.date)}:${this.latitude.toFixed(1)}:${this.phase}:${this.season}`),
@@ -116,8 +130,13 @@ export class Sky {
   draw(timestamp) {
     if (!this.x) return;
     const { x, W, H } = this;
-    x.clearRect(0, 0, W, H);
     if (!this.stars.length) this.build();
+    // Reduced motion freezes twinkle and pulses, so an unchanged sky needs no
+    // redraw at all.
+    const drawKey = this.reduced ? `${this.key}|${this.theme?.name || ''}|${W}x${H}` : null;
+    if (drawKey && drawKey === this.drawnKey) return;
+    this.drawnKey = drawKey;
+    x.clearRect(0, 0, W, H);
 
     const visibility = this.visibility();
     const showSun = this.phase === 'morning' || this.phase === 'afternoon' || this.phase === 'evening';

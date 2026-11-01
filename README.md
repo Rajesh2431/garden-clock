@@ -15,7 +15,8 @@ The reference look is black, royal-blue vines and red spiral roses. Nine more th
 - Sky layer: sun by time of day, a seeded star field, the date's zodiac constellation with a highlighted star, and the real moon phase.
 - Weather FX layer: pollen, clouds, fog, drizzle, rain, lightning and snow.
 - A garden that keeps growing: a new short vine every 18 seconds (up to 28), saved per seed and caught up after time away.
-- Click or tap anywhere to bloom a flower and call a butterfly. Clicked blooms survive theme, season and resize changes.
+- Click or tap anywhere to bloom a flower and call a butterfly. The **Bloom** button (or `B`) opens a burst of five to seven flowers along the vines without replacing the garden. Clicked blooms survive theme, season and resize changes.
+- Runs on any device: three quality tiers chosen from the hardware, with an automatic step-down when the frame rate drops.
 - City search and browser geolocation.
 - Seeded gardens, share links and PNG export.
 - Reduced-motion support, keyboard shortcuts, kiosk mode and optional screen wake lock.
@@ -66,14 +67,17 @@ The production build is written to `dist/`.
 
 ## URL parameters
 
-| Parameter    | Effect                                                                |
-| ------------ | --------------------------------------------------------------------- |
-| `?seed=1234` | Reproduce a specific garden. Seeds are positive 32-bit integers.      |
-| `?regrow=1`  | Generate a new seed on load, then remove this parameter from the URL. |
-| `?kiosk=1`   | Hide the controls on load. Press `H` to show them again.              |
-| `?debug=1`   | Show frame timing, seed, weather kind and particle counts.            |
+| Parameter    | Effect                                                                   |
+| ------------ | ------------------------------------------------------------------------ |
+| `?seed=1234` | Reproduce a specific garden. Seeds are positive 32-bit integers.         |
+| `?regrow=1`  | Generate a new seed on load, then remove this parameter from the URL.    |
+| `?quality=…` | Pin a quality tier: `high`, `medium` or `low`. Turns off auto step-down. |
+| `?kiosk=1`   | Hide the controls on load. Press `H` to show them again.                 |
+| `?debug=1`   | Show frame timing, seed, weather kind and particle counts.               |
 
-The current seed is written back to the URL when a garden is regrown or shared.
+The current seed is written back to the URL when a garden is shared. The Bloom button never
+changes the seed; a brand-new garden comes from `?regrow=1` or the installed app's "New garden"
+shortcut.
 
 ## How it works
 
@@ -116,7 +120,7 @@ and flowers are attached along each vine. Rose clusters are placed to the left, 
 bottom-right of the clock, and one or two butterflies follow slow sine paths.
 
 The same seed and viewport produce the same garden. Changing theme or weather does not change
-the geometry; regrowing creates a new seed and updates `?seed=`. The garden is rebuilt after
+the geometry; `?regrow=1` creates a new seed and updates `?seed=`. The garden is rebuilt after
 resize and after web fonts load. A rebuild with the same seed and layout keeps the garden's age,
 so a theme or season change recolours it without replaying the growth animation. Clicked blooms
 are kept for the same seed and move proportionally after a resize.
@@ -147,15 +151,35 @@ Marble for snow, Forest for fog, and the time themes otherwise. Until weather ar
 fails, Auto follows the local hour on its own.
 
 `js/fx.js` draws a separate canvas above the garden. Particle counts are capped at 340 and
-halved on low-core devices. Reduced motion lowers the counts further, removes butterflies,
+scaled by the quality tier. Reduced motion lowers the counts further, removes butterflies,
 disables lightning and skips growth animation. The garden stops animating in a hidden tab.
+
+### Quality tiers
+
+`js/quality.js` picks a starting tier and watches the frame rate.
+
+| Tier   | Chosen for                                             | Pixel ratio | Particles / stars | Garden                                  |
+| ------ | ------------------------------------------------------ | ----------- | ----------------- | --------------------------------------- |
+| high   | Desktops and laptops with more than 4 cores and 4 GB   | up to 2     | 100% / 100%       | live: leaves sway, flowers pulse        |
+| medium | Phones and tablets (touch), 4 cores or 4 GB, Save-Data | up to 1.5   | 60% / 75%         | one cached bitmap, redrawn up to 40 fps |
+| low    | 2 cores or 2 GB, or any device that cannot keep up     | 1           | 35% / 50%         | one cached bitmap, redrawn up to 24 fps |
+
+On every tier the butterflies, clicked blooms (while they open), weather and sky keep moving.
+The sky is redrawn at most 30 times a second, since its twinkle is slow. After a six-second
+warm-up, the governor checks the frame rate every three seconds. It steps down one tier after
+two slow windows (below 40 fps on high, below 24 fps on medium), or after one window below half
+of that target. It never steps back up in the same session. A step-down is remembered for a
+week so the next visit starts at the right tier. `?quality=` pins a tier, and `?debug=1` shows
+the tier, the pixel ratio and both the drawn and `requestAnimationFrame` frame rates.
+
+With reduced motion, a settled garden and sky are not redrawn at all until something changes.
 
 ### PWA and offline
 
 `vite-plugin-pwa` generates `manifest.webmanifest`, `sw.js` and `registerSW.js`. The app shell
 and local assets are precached. Google Fonts, Open-Meteo and timeapi responses use runtime
 caching. Service worker registration is an external script, so the production CSP does not need
-inline-script permission. `display` is `fullscreen`, and shortcuts open kiosk mode or regrow a
+inline-script permission. `display` is `fullscreen`, and shortcuts open kiosk mode or grow a
 garden.
 
 ## Configuration
@@ -275,9 +299,11 @@ Further documentation:
 - Reduced motion removes growth, disables lightning and lowers particle counts.
 - Auto follows the local hour before weather arrives, so the palette always matches the time.
 - Season, sky and theme checks run once a minute rather than on every clock tick.
-- Device pixel ratio is capped at 2, particle counts are bounded, and animation pauses when the
-  tab is hidden.
-- The production build is roughly 68 KB of JavaScript (24 KB gzip) and 13 KB of CSS.
+- Quality tiers cap the pixel ratio (2 / 1.5 / 1), bound the particle counts and cache the
+  garden on phones and slower machines. Animation pauses when the tab is hidden.
+- In a CPU-throttled Chromium test (4× slower, phone viewport) the medium tier holds about
+  59 fps, against 10 fps for the full-detail tier.
+- The production build is roughly 74 KB of JavaScript (26 KB gzip) and 13 KB of CSS.
 
 ## Privacy
 

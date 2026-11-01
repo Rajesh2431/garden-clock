@@ -23,9 +23,18 @@ All notable changes to Garden Clock are recorded here. The format follows
 - `wallDate()` in `js/clock.js` for timezone-correct calendar dates.
 - Vercel Web Analytics and Speed Insights on Vercel builds only.
 - `scripts/visual-check.mjs` for screenshots of every theme and season.
+- Quality tiers (`js/quality.js`): high, medium and low, picked from cores, memory, touch input
+  and Save-Data, with a frame-rate governor that steps down automatically and remembers it for
+  a week. `?quality=` pins a tier.
+- Medium and low tiers bake the grown garden into one cached bitmap and cap the pixel ratio
+  (1.5 and 1). Each canvas has its own redraw budget per tier.
+- With reduced motion, a settled garden and sky are no longer redrawn every frame.
 
 ### Changed
 
+- The Regrow button is now **Bloom**: it opens a staggered burst of flowers along the existing
+  vines with one visiting butterfly, and keeps the garden and its seed. `B` (and `R`) do the
+  same. A new garden still comes from `?regrow=1` or the "New garden" app shortcut.
 - PNG export moved from `js/main.js` to `js/export.js`.
 - Rebuilding the same garden (theme, season, toggles) keeps its age instead of replaying the
   growth animation, and clicked blooms survive rebuilds and resizes.

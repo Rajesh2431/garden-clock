@@ -67,14 +67,22 @@ describe('FX particle budgets', () => {
     expect(fx.particles).toHaveLength(150);
   });
 
-  it('halves the count on low-power devices', () => {
-    const fx = buildFx({ lowPower: true });
-    fx.set('rain', true);
-    expect(fx.particles).toHaveLength(115);
-    fx.set('storm', true);
-    expect(fx.particles).toHaveLength(170);
-    fx.set('clear', false);
-    expect(fx.particles).toHaveLength(0);
+  it('scales the particle budget with the quality tier', () => {
+    const medium = buildFx({ lowPower: true });
+    expect(medium.quality).toBe('medium');
+    medium.set('rain', true);
+    expect(medium.particles).toHaveLength(138);
+
+    const low = buildFx({ quality: 'low' });
+    low.set('storm', true);
+    expect(low.particles).toHaveLength(119);
+    low.set('clear', false);
+    expect(low.particles).toHaveLength(0);
+
+    expect(low.setQuality('high')).toBe(true);
+    low.set('storm', true);
+    expect(low.particles).toHaveLength(340);
+    expect(low.setQuality('bogus')).toBe(false);
   });
 
   it('uses a calm particle budget with reduced motion', () => {

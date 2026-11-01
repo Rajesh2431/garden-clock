@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FLOWER_SPECIES, GROW_MS, Garden, MAX_EXTRA_GROWTH } from '../../js/garden.js';
+import { FLOWER_SPECIES, GARDEN_QUALITY, GROW_MS, Garden, MAX_EXTRA_GROWTH } from '../../js/garden.js';
 import { SEASON_KEYS } from '../../js/almanac.js';
 import { THEMES } from '../../js/themes.js';
 
@@ -258,11 +258,51 @@ describe('Click blooms and butterflies', () => {
     expect(flower.y).toBeLessThan(garden.H);
   });
 
-  it('caps blooms and visitors', () => {
+  it('caps blooms per quality tier and caps visitors', () => {
     const garden = buildGarden(12);
-    for (let i = 0; i < 60; i += 1) garden.bloomAt(30 + i, 30 + i);
-    expect(garden.extras).toHaveLength(48);
+    for (let i = 0; i < 80; i += 1) garden.bloomAt(30 + i, 30 + i);
+    expect(garden.extras).toHaveLength(GARDEN_QUALITY.high.maxExtras);
     expect(garden.butterflies.length).toBeLessThanOrEqual(8);
+
+    const low = buildGarden(12, 1200, 800, { quality: 'low' });
+    for (let i = 0; i < 80; i += 1) low.bloomAt(30 + i, 30 + i);
+    expect(low.extras).toHaveLength(GARDEN_QUALITY.low.maxExtras);
+  });
+
+  it('blooms a staggered burst on the vines without changing the garden', () => {
+    const garden = buildGarden(31);
+    const seed = garden.seed;
+    const vines = JSON.stringify(garden.vines.map((vine) => vine.pts));
+    const visitors = garden.butterflies.length;
+    const started = performance.now();
+    const flowers = garden.bloomBurst({ count: 6 });
+
+    expect(flowers).toHaveLength(6);
+    expect(garden.extras).toHaveLength(6);
+    expect(garden.seed).toBe(seed);
+    expect(JSON.stringify(garden.vines.map((vine) => vine.pts))).toBe(vines);
+    // One butterfly per burst, not one per flower.
+    expect(garden.butterflies.length).toBe(visitors + 1);
+    // Blooms open one after another.
+    for (let i = 1; i < flowers.length; i += 1) {
+      expect(flowers[i].bornAt).toBeGreaterThan(flowers[i - 1].bornAt);
+    }
+    expect(flowers[0].bornAt).toBeGreaterThanOrEqual(started);
+
+    const { box } = garden;
+    for (const flower of flowers) {
+      const inside =
+        flower.x > box.x && flower.x < box.x + box.w && flower.y > box.y && flower.y < box.y + box.h;
+      expect(inside).toBe(false);
+    }
+  });
+
+  it('opens a burst immediately with reduced motion', () => {
+    const garden = buildGarden(31, 1200, 800, { reducedMotion: true });
+    const flowers = garden.bloomBurst({ count: 4 });
+    expect(flowers.length).toBeGreaterThan(0);
+    expect(flowers.every((flower) => flower.bornAt === 0)).toBe(true);
+    expect(garden.butterflies).toEqual([]);
   });
 
   it('keeps clicked blooms and the garden age when the same garden is rebuilt', () => {
@@ -348,5 +388,55 @@ describe('Garden timing and wind', () => {
     const garden = new Garden({ getContext: () => ({}) });
     const size = garden.resize();
     expect(size).toEqual({ width: 800, height: 600 });
+  });
+});
+
+describe('Garden quality tiers', () => {
+  it('starts on medium for low-power devices and accepts an explicit tier', () => {
+    expect(buildGarden(1, 800, 600, { lowPower: true }).quality).toBe('medium');
+    expect(buildGarden(1, 800, 600, { quality: 'low' }).quality).toBe('low');
+    expect(buildGarden(1, 800, 600).quality).toBe('high');
+  });
+
+  it('caps the pixel ratio per tier', () => {
+    const previous = globalThis.devicePixelRatio;
+    globalThis.devicePixelRatio = 3;
+    try {
+      const garden = buildGarden(1, 800, 600);
+      garden.resize();
+      expect(garden.dpr).toBe(2);
+      garden.setQuality('medium');
+      garden.resize();
+      expect(garden.dpr).toBe(1.5);
+      garden.setQuality('low');
+      garden.resize();
+      expect(garden.dpr).toBe(1);
+    } finally {
+      globalThis.devicePixelRatio = previous;
+    }
+  });
+
+  it('uses a static scene below high and with reduced motion', () => {
+    expect(buildGarden(1, 800, 600).staticScene).toBe(false);
+    expect(buildGarden(1, 800, 600, { quality: 'medium' }).staticScene).toBe(true);
+    expect(buildGarden(1, 800, 600, { quality: 'low' }).staticScene).toBe(true);
+    expect(buildGarden(1, 800, 600, { reducedMotion: true }).staticScene).toBe(true);
+  });
+
+  it('draws every tier, including a settled burst, without throwing', () => {
+    for (const quality of Object.keys(GARDEN_QUALITY)) {
+      const garden = buildGarden(5, 800, 600, { quality });
+      garden.t0 = performance.now() - GROW_MS * 2;
+      garden.bloomBurst({ count: 3 });
+      expect(() => garden.draw(THEMES.noir, performance.now())).not.toThrow();
+      expect(() => garden.draw(THEMES.noir, performance.now() + 10_000)).not.toThrow();
+      expect(() => garden.draw(THEMES.neon, performance.now() + 10_100)).not.toThrow();
+    }
+  });
+
+  it('rejects an unknown tier', () => {
+    const garden = buildGarden(1, 800, 600);
+    expect(garden.setQuality('ultra')).toBe(false);
+    expect(garden.quality).toBe('high');
   });
 });

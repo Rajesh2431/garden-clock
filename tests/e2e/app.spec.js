@@ -307,16 +307,27 @@ test('city search updates the clock, weather and timezone', async ({ page }) => 
   await expect(page.locator('#tz')).toContainText('GMT+9');
 });
 
-test('regrow creates a fresh seed and persists it in the URL', async ({ page }) => {
-  await openApp(page, { url: '/?seed=1234' });
+test('the Bloom button adds flowers and keeps the same garden', async ({ page }) => {
+  await openApp(page, { url: '/?seed=1234&debug=1' });
+  const debug = page.locator('#debug');
+  await expect(debug).toContainText('blooms 0');
+
+  await page.locator('#bloom').click();
+  await expect(page.locator('#toast')).toContainText('flowers are blooming');
+  await expect(debug).toContainText(/blooms [5-7]\b/);
   expect(new URL(page.url()).searchParams.get('seed')).toBe('1234');
+  await expect(debug).toContainText('seed 1234');
 
-  await page.locator('#regrow').click();
-  await expect(page.locator('#toast')).toContainText('A new garden is growing');
+  // B (and R, for muscle memory) bloom more instead of replacing the garden.
+  await page.locator('body').press('b');
+  await expect(debug).toContainText(/blooms 1[0-4]\b/);
+  await expect(debug).toContainText('seed 1234');
+});
 
-  const nextSeed = await page.evaluate(() => new URL(location.href).searchParams.get('seed'));
-  expect(nextSeed).toBeTruthy();
-  expect(nextSeed).not.toBe('1234');
+test('?quality= pins a tier and shows it in the debug overlay', async ({ page }) => {
+  await openApp(page, { url: '/?seed=1234&debug=1&quality=low' });
+  await expect(page.locator('#debug')).toContainText('low (locked)');
+  await expect(page.locator('#debug')).toContainText('dpr 1');
 });
 
 test('regrow shortcut creates a seed and removes the flag', async ({ page }) => {
@@ -369,7 +380,7 @@ test('keyboard shortcut H hides and shows the controls', async ({ page }) => {
 test('shortcuts still work while a control button has focus', async ({ page }) => {
   await openApp(page);
 
-  await page.focus('#regrow');
+  await page.focus('#bloom');
   await page.keyboard.press('h');
   await expect(page.locator('#controls')).toBeHidden();
   await page.keyboard.press('Escape');

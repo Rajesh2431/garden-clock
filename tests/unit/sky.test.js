@@ -104,12 +104,16 @@ describe('Sky state and stars', () => {
     expect(sky.stars.every((star) => star.x <= 600 && star.y <= 400)).toBe(true);
   });
 
-  it('halves the star budget on low-power devices', () => {
+  it('scales the star budget with the quality tier', () => {
+    const night = { date: FIXED_DATE, phase: 'night', kind: 'clear', season: 'autumn' };
     const sky = buildSky(1200, 800, { lowPower: true });
-    sky.set({ date: FIXED_DATE, phase: 'night', kind: 'clear', season: 'autumn' });
+    sky.set(night);
+    expect(sky.stars).toHaveLength(99);
+    sky.setQuality('low');
+    sky.set(night);
     expect(sky.stars).toHaveLength(66);
     sky.setLowPower(false);
-    sky.set({ date: FIXED_DATE, phase: 'night', kind: 'clear', season: 'autumn' });
+    sky.set(night);
     expect(sky.stars).toHaveLength(132);
   });
 

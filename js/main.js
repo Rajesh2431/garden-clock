@@ -25,6 +25,7 @@ import {
 } from './almanac.js';
 import { clamp, randomSeed } from './rand.js';
 import { composeScene, downloadCanvas } from './export.js';
+import { BURST_SIZE, FRAME_BUDGET, FrameGovernor, detectQuality, isTier } from './quality.js';
 import { initMonitoring, track } from './monitor.js';
 import { inject } from '@vercel/analytics';
 import { injectSpeedInsights } from '@vercel/speed-insights';
@@ -42,6 +43,7 @@ const KEYS = {
   secs: 'garden-clock:secs',
   loc: 'garden-clock:loc',
   growth: 'garden-clock:growth:v1',
+  quality: 'garden-clock:quality:v1',
 };
 
 const store = {
@@ -77,10 +79,16 @@ const initialLoc =
   savedLoc && Number.isFinite(savedLoc.lat) && Number.isFinite(savedLoc.lon) ? savedLoc : null;
 const regrowOnLoad = params.get('regrow') === '1';
 const urlSeed = regrowOnLoad ? null : readSeedParam();
-const lowPower = !!(
-  (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) ||
-  (navigator.deviceMemory && navigator.deviceMemory <= 4)
-);
+const qualityParam = params.get('quality');
+const qualityLocked = isTier(qualityParam);
+const initialQuality = detectQuality({
+  cores: navigator.hardwareConcurrency,
+  memory: navigator.deviceMemory,
+  coarse: window.matchMedia?.('(pointer: coarse)').matches,
+  saveData: navigator.connection?.saveData,
+  override: qualityParam,
+  remembered: qualityLocked ? null : store.get(KEYS.quality, null),
+});
 
 const els = {
   stage: $('#stage'),
@@ -114,7 +122,7 @@ const els = {
   sim: $('#sim'),
   h12: $('#h12'),
   secs: $('#secs'),
-  regrow: $('#regrow'),
+  bloom: $('#bloom'),
   share: $('#share'),
   save: $('#save'),
   fullscreen: $('#fullscreen'),
@@ -156,7 +164,7 @@ const state = {
   growth: 0,
   builtSeason: null,
   hiddenAt: 0,
-  lowPower,
+  quality: initialQuality,
   reduced: reducedQuery.matches,
   lastSecond: -1,
   lastClockKey: '',
@@ -176,21 +184,24 @@ if (state.seasonPref !== 'auto' && !SEASON_KEYS.includes(state.seasonPref)) stat
 
 const garden = new Garden(els.garden, {
   reducedMotion: state.reduced,
-  lowPower: state.lowPower,
+  quality: state.quality,
 });
 const fx = new FX(els.fx, {
   reducedMotion: state.reduced,
-  lowPower: state.lowPower,
+  quality: state.quality,
   seed: state.seed,
 });
 const sky = new Sky(els.sky, {
   reducedMotion: state.reduced,
-  lowPower: state.lowPower,
+  quality: state.quality,
 });
+const governor = new FrameGovernor({ tier: state.quality, locked: qualityLocked });
 
 let rafId = 0;
 let lastFrame = 0;
 let lastRender = 0;
+// Per-canvas redraw times; each layer has its own budget per quality tier.
+const layerAt = { sky: 0, garden: 0, fx: 0 };
 let toastTimer = 0;
 let resizeTimer = 0;
 let fpsFrames = 0;
@@ -388,20 +399,13 @@ function setSeedParam() {
   history.replaceState(null, '', url);
 }
 
-function rebuildGarden({ freshSeed = false, announce = false } = {}) {
-  if (freshSeed) {
-    state.seed = randomSeed();
-    state.growth = 0;
-    setSeedParam();
-    persistGrowth();
-  }
+function rebuildGarden() {
   garden.build(boxOfClock(), state.seed, state.current, {
     season: state.seasonKey,
     growth: state.growth,
   });
   state.builtSeason = state.seasonKey;
   garden.setWind(state.wind);
-  if (announce) toast('A new garden is growing');
   if (state.debug) updateDebug();
   track('garden_build', {
     seed: state.seed,
@@ -412,8 +416,29 @@ function rebuildGarden({ freshSeed = false, announce = false } = {}) {
   });
 }
 
-function regrow(options = {}) {
-  rebuildGarden({ freshSeed: true, announce: true, ...options });
+// The Bloom button keeps the garden and opens a burst of flowers along its
+// vines, with one butterfly coming to visit.
+function bloomMore() {
+  const flowers = garden.bloomBurst({ count: BURST_SIZE[state.quality], season: state.seasonKey });
+  if (!flowers.length) return;
+  toast(flowers.length === 1 ? 'A flower is blooming' : `${flowers.length} flowers are blooming`);
+  track('bloom_burst', { count: flowers.length, season: state.seasonKey, quality: state.quality });
+  if (state.debug) updateDebug();
+}
+
+// Move every canvas to a new quality tier. A rebuild with the same seed keeps
+// the garden, its age and the clicked blooms; only the pixel ratio and the
+// particle budgets change.
+function applyQuality(tier, { remember = false } = {}) {
+  if (!isTier(tier) || tier === state.quality) return;
+  state.quality = tier;
+  garden.setQuality(tier);
+  fx.setQuality(tier);
+  sky.setQuality(tier);
+  if (remember) store.set(KEYS.quality, { tier, at: Date.now() });
+  initLayout();
+  track('quality', { tier, fps: Math.round(governor.fps) });
+  if (state.debug) updateDebug();
 }
 
 function initLayout() {
@@ -698,12 +723,7 @@ function attachUI() {
     scheduleRebuild();
   });
 
-  els.regrow.addEventListener('click', () => {
-    state.growth = 0;
-    persistGrowth();
-    regrow();
-    track('regrow', { seed: state.seed });
-  });
+  els.bloom.addEventListener('click', bloomMore);
 
   els.share.addEventListener('click', shareGarden);
   els.save.addEventListener('click', saveGarden);
@@ -933,11 +953,9 @@ function handleKeydown(event) {
     event.preventDefault();
     const hidden = els.controls.classList.toggle('hidden');
     toast(hidden ? 'Controls hidden · press H to show' : 'Controls shown');
-  } else if (key === 'r') {
+  } else if (key === 'b' || key === 'r') {
     event.preventDefault();
-    state.growth = 0;
-    persistGrowth();
-    regrow();
+    bloomMore();
   } else if (event.key === 'Escape' && els.controls.classList.contains('hidden')) {
     els.controls.classList.remove('hidden');
   }
@@ -975,6 +993,7 @@ function handleVisibility() {
   catchUpGrowth(hiddenFor);
   lastFrame = performance.now();
   lastRender = 0;
+  governor.reset();
   updateClock(true);
   startLoop();
   keepAwake();
@@ -999,26 +1018,38 @@ function updateDebug() {
     `${effectiveKind()} ${state.isDay ? 'day' : 'night'} · ${state.phase} · wind ${Math.round(state.wind)} km/h`,
     `${SEASONS[state.seasonKey]?.label || state.seasonKey} · ${state.moon.name} · growth ${state.growth}/${MAX_EXTRA_GROWTH}`,
     `blooms ${garden.extras.length} · visitors ${garden.butterflies.length}`,
-    `${fps} fps · build ${garden.buildMs.toFixed(1)} ms`,
+    `${fps} fps drawn · ${Math.round(governor.fps) || '–'} fps rAF · ${state.quality}${qualityLocked ? ' (locked)' : ''}`,
+    `build ${garden.buildMs.toFixed(1)} ms · dpr ${garden.dpr}`,
     `offset ${Math.round(info.offset)} ms · ${info.source || 'local'}`,
   ].join('\n');
+}
+
+function due(layer, budget, timestamp) {
+  if (budget && timestamp - layerAt[layer] < budget) return false;
+  layerAt[layer] = timestamp;
+  return true;
 }
 
 function frame(timestamp) {
   rafId = requestAnimationFrame(frame);
   updateClock();
 
+  const slower = governor.sample(timestamp);
+  if (slower) applyQuality(slower, { remember: true });
+
   const slow = ['cloud', 'fog'].includes(effectiveKind());
   const interval = state.reduced ? 1000 / 12 : slow ? 1000 / 30 : 0;
   if (interval && timestamp - lastRender < interval) return;
-
-  const dt = lastFrame ? Math.min(0.08, (timestamp - lastFrame) / 1000) : 1 / 60;
-  lastFrame = timestamp;
   lastRender = timestamp;
 
-  sky.draw(timestamp);
-  garden.draw(state.current, timestamp);
-  fx.draw(dt, timestamp, state.current);
+  const budget = FRAME_BUDGET[state.quality] || FRAME_BUDGET.high;
+  if (due('sky', budget.sky, timestamp)) sky.draw(timestamp);
+  if (due('garden', budget.garden, timestamp)) garden.draw(state.current, timestamp);
+  if (due('fx', budget.fx, timestamp)) {
+    const dt = lastFrame ? Math.min(0.08, (timestamp - lastFrame) / 1000) : 1 / 60;
+    lastFrame = timestamp;
+    fx.draw(dt, timestamp, state.current);
+  }
 
   fpsFrames += 1;
   if (timestamp - fpsAt > 500) {
@@ -1033,6 +1064,9 @@ function startLoop() {
   if (!rafId) {
     lastFrame = performance.now();
     lastRender = 0;
+    layerAt.sky = 0;
+    layerAt.garden = 0;
+    layerAt.fx = 0;
     fpsAt = performance.now();
     fpsFrames = 0;
     rafId = requestAnimationFrame(frame);

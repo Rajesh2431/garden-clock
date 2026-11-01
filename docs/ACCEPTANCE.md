@@ -59,7 +59,7 @@ Browser coverage includes:
 - Every theme and every simulated weather condition, with page-error collection.
 - 12-hour mode and seconds toggle.
 - City search updating weather, timezone and clock.
-- Regrow button and `?regrow=1` shortcut.
+- Bloom button (burst of flowers on the same garden) and `?regrow=1` for a new garden.
 - PNG export.
 - Cached-weather fallback and retry visibility.
 - Local-clock fallback when time services fail.

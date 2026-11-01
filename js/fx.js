@@ -3,6 +3,10 @@
 
 import { clamp, mulberry32, randomSeed } from './rand.js';
 
+// Share of the full particle/star budget per quality tier, and pixel-ratio caps.
+const QUALITY = { high: 1, medium: 0.6, low: 0.35 };
+const MAX_DPR = { high: 2, medium: 1.5, low: 1 };
+
 const COUNTS = { clear: 34, cloud: 7, fog: 6, drizzle: 90, rain: 230, storm: 340, snow: 150 };
 
 export class FX {
@@ -17,7 +21,8 @@ export class FX {
     this.wind = 0;
     this.theme = null;
     this.reduced = !!options.reducedMotion;
-    this.lowPower = !!options.lowPower;
+    this.quality = QUALITY[options.quality] ? options.quality : options.lowPower ? 'medium' : 'high';
+    this.lowPower = this.quality !== 'high';
     this.particles = [];
     this.flash = 0;
     this.nextBolt = 4;
@@ -32,7 +37,7 @@ export class FX {
     const rect = this.c?.getBoundingClientRect?.() || { width: 800, height: 600 };
     this.W = Math.max(1, rect.width || 800);
     this.H = Math.max(1, rect.height || 600);
-    const dpr = clamp(globalThis.devicePixelRatio || 1, 1, 2);
+    const dpr = clamp(globalThis.devicePixelRatio || 1, 1, MAX_DPR[this.quality] || 2);
     this.dpr = dpr;
     const pixelWidth = Math.max(1, Math.round(this.W * dpr));
     const pixelHeight = Math.max(1, Math.round(this.H * dpr));
@@ -49,7 +54,16 @@ export class FX {
   }
 
   setLowPower(value) {
-    this.lowPower = !!value;
+    this.setQuality(value ? 'medium' : 'high');
+  }
+
+  /** Switch quality tier. Call resize() afterwards so the pixel ratio applies. */
+  setQuality(quality) {
+    if (!QUALITY[quality]) return false;
+    const changed = quality !== this.quality;
+    this.quality = quality;
+    this.lowPower = quality !== 'high';
+    return changed;
   }
 
   set(kind, day, wind = 0, theme) {
@@ -62,7 +76,7 @@ export class FX {
     this.nextBolt = 3 + this.rnd() * 6;
     this.seed = (this.seed + Math.floor(this.rnd() * 1e6) + 1) >>> 0;
     const rnd = mulberry32(this.seed);
-    const quality = (this.lowPower ? 0.5 : 1) * (this.reduced ? 0.28 : 1);
+    const quality = QUALITY[this.quality] * (this.reduced ? 0.28 : 1);
     const { W, H } = this;
     const baseKind = this.kind;
     const count = baseKind === 'clear' && !this.day ? 0 : Math.round((COUNTS[baseKind] ?? 0) * quality);

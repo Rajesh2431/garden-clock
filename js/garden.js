@@ -9,6 +9,15 @@ const TAU = Math.PI * 2;
 export const GROW_MS = 7000;
 export const EXTRA_GROW_MS = 2600;
 export const MAX_EXTRA_GROWTH = 28;
+export const BLOOM_MS = 900;
+
+// Per-device quality tiers. `static` bakes the grown garden into one bitmap so
+// a frame costs a single drawImage plus whatever is still animating.
+export const GARDEN_QUALITY = {
+  high: { maxDpr: 2, shadows: true, static: false, maxExtras: 64 },
+  medium: { maxDpr: 1.5, shadows: false, static: true, maxExtras: 48 },
+  low: { maxDpr: 1, shadows: false, static: true, maxExtras: 32 },
+};
 export const FLOWER_SPECIES = [
   'rose',
   'daisy',
@@ -113,8 +122,13 @@ export class Garden {
     this.t0 = 0;
     this.wind = 0;
     this.reduced = !!options.reducedMotion;
-    this.lowPower = !!options.lowPower;
+    this.quality = GARDEN_QUALITY[options.quality] ? options.quality : options.lowPower ? 'medium' : 'high';
+    this.lowPower = this.quality !== 'high';
     this.stemsCache = null;
+    this.sceneCache = null;
+    this.fullCache = null;
+    this.cacheTheme = null;
+    this.extrasVersion = 0;
     this.buildMs = 0;
     this.extraGrowth = 0;
     this.extras = [];
@@ -127,7 +141,7 @@ export class Garden {
     const rect = this.c?.getBoundingClientRect?.() || { width: 800, height: 600 };
     this.W = Math.max(1, rect.width || 800);
     this.H = Math.max(1, rect.height || 600);
-    const dpr = clamp(globalThis.devicePixelRatio || 1, 1, 2);
+    const dpr = clamp(globalThis.devicePixelRatio || 1, 1, this.tier.maxDpr);
     this.dpr = dpr;
     const pixelWidth = Math.max(1, Math.round(this.W * dpr));
     const pixelHeight = Math.max(1, Math.round(this.H * dpr));
@@ -136,8 +150,35 @@ export class Garden {
       if (this.c.height !== pixelHeight) this.c.height = pixelHeight;
     }
     if (this.x?.setTransform) this.x.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.stemsCache = null;
+    this.invalidateCaches();
     return { width: this.W, height: this.H };
+  }
+
+  get tier() {
+    return GARDEN_QUALITY[this.quality] || GARDEN_QUALITY.high;
+  }
+
+  /** Static mode: low tier, or reduced motion where nothing should sway anyway. */
+  get staticScene() {
+    return this.reduced || this.tier.static;
+  }
+
+  invalidateCaches() {
+    this.idleKey = null;
+    this.stemsCache = null;
+    this.sceneCache = null;
+    this.fullCache = null;
+    this.cacheTheme = null;
+  }
+
+  /** Switch quality tier. Call resize() afterwards so the pixel ratio applies. */
+  setQuality(quality) {
+    if (!GARDEN_QUALITY[quality]) return false;
+    const changed = quality !== this.quality;
+    this.quality = quality;
+    this.lowPower = quality !== 'high';
+    if (changed) this.invalidateCaches();
+    return changed;
   }
 
   setWind(windKmh) {
@@ -146,15 +187,15 @@ export class Garden {
 
   setReduced(reduced) {
     this.reduced = !!reduced;
+    this.invalidateCaches();
     if (this.reduced) {
       this.t0 = performance.now() - GROW_MS * 2;
-      this.stemsCache = null;
       this.butterflies = [];
     }
   }
 
   setLowPower(value) {
-    this.lowPower = !!value;
+    this.setQuality(value ? 'medium' : 'high');
   }
 
   /**
@@ -189,7 +230,8 @@ export class Garden {
     this.extras = sameSeed ? carryExtras(previous, this.W, this.H, this.box) : [];
     this.extraGrowth = 0;
     this.newestGrowthAt = 0;
-    this.stemsCache = null;
+    this.invalidateCaches();
+    this.extrasVersion += 1;
     this.builtW = this.W;
     this.builtH = this.H;
     if (this.reduced) this.t0 = performance.now() - GROW_MS * 2;
@@ -530,7 +572,7 @@ export class Garden {
       growMs: EXTRA_GROW_MS,
     };
     this.vines.push(vine);
-    this.stemsCache = null;
+    this.invalidateCaches();
     this.newestGrowthAt = bornAt;
     return vine;
   }
@@ -545,6 +587,8 @@ export class Garden {
   /**
    * Bloom a single flower where the visitor clicked and send a butterfly to it.
    * The clock box is protected so a bloom never obscures the digits.
+   * Options: `season`, `species`, `delay` (ms before it opens), `summon` (false
+   * to skip the butterfly).
    */
   bloomAt(x, y, options = {}) {
     if (!this.W || !this.H) this.resize();
@@ -567,14 +611,64 @@ export class Garden {
       ph: rnd() * TAU,
       ci: Math.floor(rnd() * 997),
       species: options.species || pickSpecies(rnd, this.theme, season),
-      bornAt: this.reduced ? 0 : performance.now(),
+      bornAt: this.reduced ? 0 : performance.now() + Math.max(0, Number(options.delay) || 0),
       stem: (8 + rnd() * 10) * scale,
       stemBend: (rnd() - 0.5) * 0.7,
     };
     this.extras.push(flower);
-    if (this.extras.length > 48) this.extras.shift();
-    this.summonButterfly(px, py);
+    while (this.extras.length > this.tier.maxExtras) this.extras.shift();
+    this.extrasVersion += 1;
+    if (options.summon !== false) this.summonButterfly(px, py);
     return flower;
+  }
+
+  /**
+   * Open a burst of extra flowers along the existing vines, one after another,
+   * without changing the garden. Spots inside the clock box are skipped and
+   * blooms keep a minimum distance from each other.
+   */
+  bloomBurst(options = {}) {
+    if (!this.W || !this.H) this.resize();
+    const count = clamp(Math.floor(Number(options.count) || 6), 1, 16);
+    const stagger = this.reduced ? 0 : (options.stagger ?? 140);
+    const rnd = mulberry32(
+      (this.seed ^ Math.imul(this.extrasVersion + 7, 0x27d4eb2d) ^ Math.floor(performance.now())) >>> 0,
+    );
+    const clock = this.box;
+    const pad = 18;
+    const minGap = 46 * clamp(Math.min(this.W, this.H) / 900, 0.58, 1.35);
+    const blocked = (x, y) =>
+      clock &&
+      x > clock.x - pad &&
+      x < clock.x + clock.w + pad &&
+      y > clock.y - pad &&
+      y < clock.y + clock.h + pad;
+    const candidates = [];
+    for (const vine of this.vines) {
+      for (let i = 2; i < vine.pts.length; i += 3) {
+        const [x, y] = vine.pts[i];
+        if (x < 16 || y < 16 || x > this.W - 16 || y > this.H - 16 || blocked(x, y)) continue;
+        candidates.push([x, y]);
+      }
+    }
+    const taken = this.extras.map((flower) => [flower.x, flower.y]);
+    const flowers = [];
+    for (let attempt = 0; attempt < count * 30 && flowers.length < count; attempt += 1) {
+      const [x, y] = candidates.length
+        ? candidates[Math.floor(rnd() * candidates.length)]
+        : [16 + rnd() * (this.W - 32), 16 + rnd() * (this.H - 32)];
+      if (blocked(x, y)) continue;
+      if (taken.some(([tx, ty]) => Math.hypot(tx - x, ty - y) < minGap)) continue;
+      taken.push([x, y]);
+      flowers.push(
+        this.bloomAt(x + (rnd() - 0.5) * 10, y + (rnd() - 0.5) * 10, {
+          season: options.season,
+          delay: flowers.length * stagger,
+          summon: flowers.length === 0,
+        }),
+      );
+    }
+    return flowers;
   }
 
   summonButterfly(x, y) {
@@ -610,35 +704,112 @@ export class Garden {
 
   draw(theme, timestamp) {
     if (!this.x || !this.vines.length) return;
+    if (this.cacheTheme && this.cacheTheme !== theme) this.invalidateCaches();
     this.theme = theme;
     const { x, W, H } = this;
-    x.clearRect(0, 0, W, H);
 
     const elapsed = timestamp - this.t0;
     const progress = this.reduced ? 1 : clamp(elapsed / GROW_MS, 0, 1);
     const grown = easeOutCubic(progress);
-    const windAmp = this.reduced ? 0 : clamp(0.18 + this.wind / 45, 0.18, 1.25);
-    const growingExtra = this.vines.some(
-      (vine) => vine.bornAt && timestamp - vine.bornAt < (vine.growMs || EXTRA_GROW_MS),
-    );
+    const settled =
+      progress >= 1 &&
+      !this.vines.some((vine) => vine.bornAt && timestamp - vine.bornAt < (vine.growMs || EXTRA_GROW_MS));
 
-    if (progress >= 1 && !growingExtra) {
-      if (!this.stemsCache) this.renderStemsCache(theme);
-      if (this.stemsCache) x.drawImage(this.stemsCache, 0, 0, W, H);
+    // With reduced motion and nothing opening, the canvas already shows the
+    // final picture: skip the frame entirely.
+    const idleKey = this.reduced && settled ? `${this.extrasVersion}|${theme.name}` : null;
+    if (idleKey && idleKey === this.idleKey) return;
+    this.idleKey = null;
+    x.clearRect(0, 0, W, H);
+
+    if (settled && this.staticScene) {
+      this.drawStaticScene(x, theme, timestamp);
+      if (idleKey && (this.fullCache || (this.sceneCache && !this.extras.length))) this.idleKey = idleKey;
     } else {
-      for (const vine of this.vines) {
-        this.drawStem(x, vine, theme, this.vineLocal(vine, grown, timestamp));
+      const windAmp = this.reduced ? 0 : clamp(0.18 + this.wind / 45, 0.18, 1.25);
+      if (settled) {
+        if (!this.stemsCache) this.stemsCache = this.renderLayer((ctx) => this.drawStems(ctx, theme, 1, 0));
+        if (this.stemsCache) x.drawImage(this.stemsCache, 0, 0, W, H);
+      } else {
+        this.drawStems(x, theme, grown, timestamp);
+      }
+      this.drawFoliage(x, theme, grown, timestamp, windAmp);
+      for (const flower of this.extras) this.drawExtra(x, flower, theme, timestamp, windAmp);
+    }
+
+    if (!this.reduced) {
+      const windAmp = clamp(0.18 + this.wind / 45, 0.18, 1.25);
+      for (const butterfly of this.butterflies) {
+        this.drawButterfly(x, butterfly, timestamp, theme, windAmp);
       }
     }
+  }
 
+  /**
+   * Low tier / reduced motion: the grown garden is one bitmap. Clicked blooms
+   * animate on top while they open, then get baked into a second bitmap.
+   */
+  drawStaticScene(x, theme, timestamp) {
+    const { W, H } = this;
+    if (!this.sceneCache) {
+      this.sceneCache = this.renderLayer((ctx) => {
+        this.drawStems(ctx, theme, 1, 0);
+        this.drawFoliage(ctx, theme, 1, 0, 0);
+      });
+      this.fullCache = null;
+    }
+    const opening = this.extras.some((flower) => !this.extraSettled(flower, timestamp));
+    if (opening || !this.extras.length) {
+      if (this.sceneCache) x.drawImage(this.sceneCache, 0, 0, W, H);
+      for (const flower of this.extras) this.drawExtra(x, flower, theme, timestamp, 0);
+      return;
+    }
+    if (!this.fullCache || this.fullCache.version !== this.extrasVersion) {
+      const canvas = this.renderLayer((ctx) => {
+        if (this.sceneCache) ctx.drawImage(this.sceneCache, 0, 0, W, H);
+        for (const flower of this.extras) this.drawExtra(ctx, flower, theme, 0, 0);
+      });
+      if (canvas) canvas.version = this.extrasVersion;
+      this.fullCache = canvas;
+    }
+    if (this.fullCache) x.drawImage(this.fullCache, 0, 0, W, H);
+    else if (this.sceneCache) x.drawImage(this.sceneCache, 0, 0, W, H);
+  }
+
+  extraSettled(flower, timestamp) {
+    return this.reduced || !flower.bornAt || timestamp - flower.bornAt >= BLOOM_MS;
+  }
+
+  /** Render into an offscreen canvas at the current pixel ratio. */
+  renderLayer(paint) {
+    if (typeof document === 'undefined') return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(this.W * this.dpr));
+    canvas.height = Math.max(1, Math.round(this.H * this.dpr));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    paint(ctx);
+    this.cacheTheme = this.theme;
+    return canvas;
+  }
+
+  drawStems(ctx, theme, grown, timestamp) {
     for (const vine of this.vines) {
-      this.drawLeaves(x, vine, theme, this.vineLocal(vine, grown, timestamp), timestamp, windAmp);
+      this.drawStem(ctx, vine, theme, timestamp ? this.vineLocal(vine, grown, timestamp) : 1);
+    }
+  }
+
+  drawFoliage(ctx, theme, grown, timestamp, windAmp) {
+    const local = (vine) => (timestamp ? this.vineLocal(vine, grown, timestamp) : 1);
+    for (const vine of this.vines) {
+      this.drawLeaves(ctx, vine, theme, local(vine), timestamp, windAmp);
     }
 
     for (const vine of this.vines) {
-      const local = this.vineLocal(vine, grown, timestamp);
-      if (local <= 0) continue;
-      const count = Math.max(2, Math.floor(local * vine.pts.length));
+      const progress = local(vine);
+      if (progress <= 0) continue;
+      const count = Math.max(2, Math.floor(progress * vine.pts.length));
       for (const flower of vine.flowers) {
         if (flower.i >= count) continue;
         const bloom = clamp((count - flower.i) / 10, 0, 1);
@@ -646,7 +817,7 @@ export class Garden {
         const [px, py] = vine.pts[flower.i];
         const pulse = 1 + Math.sin(timestamp / 1400 + flower.ph) * 0.03 * (0.45 + windAmp);
         this.drawFlower(
-          x,
+          ctx,
           px,
           py,
           flower.r * pulse,
@@ -661,11 +832,11 @@ export class Garden {
     }
 
     for (const flower of this.clusters) {
-      const bloom = this.reduced ? 1 : clamp((grown - flower.delay) / 0.16, 0, 1);
+      const bloom = this.reduced || !timestamp ? 1 : clamp((grown - flower.delay) / 0.16, 0, 1);
       if (bloom <= 0) continue;
       const pulse = 1 + Math.sin(timestamp / 1400 + flower.ph) * 0.03 * (0.45 + windAmp);
       this.drawFlower(
-        x,
+        ctx,
         flower.x,
         flower.y,
         flower.r * pulse,
@@ -677,46 +848,40 @@ export class Garden {
         flower.species,
       );
     }
+  }
 
-    for (const flower of this.extras) {
-      const bloom = this.reduced || !flower.bornAt ? 1 : clamp((timestamp - flower.bornAt) / 900, 0, 1);
-      const pulse = 1 + Math.sin(timestamp / 1300 + flower.ph) * 0.025 * (0.4 + windAmp);
-      x.save();
-      x.strokeStyle = theme.vine;
-      x.globalAlpha = 0.7;
-      x.lineWidth = Math.max(0.8, flower.r * 0.06);
-      x.beginPath();
-      x.moveTo(flower.x, flower.y + flower.stem * 1.7);
-      x.quadraticCurveTo(
-        flower.x + flower.stemBend * 12,
-        flower.y + flower.stem * 0.7,
-        flower.x,
-        flower.y + flower.r * 0.25,
-      );
-      x.stroke();
-      x.restore();
-      this.drawFlower(
-        x,
-        flower.x,
-        flower.y,
-        flower.r * pulse,
-        flower.rot,
-        theme,
-        flower.ph,
-        bloom,
-        flower.ci,
-        flower.species,
-      );
-    }
-
-    if (!this.reduced) {
-      for (const butterfly of this.butterflies) {
-        this.drawButterfly(x, butterfly, timestamp, theme, windAmp);
-      }
-    }
-
-    // Build the stem-only cache after the first fully grown frame.
-    if (progress >= 1 && !growingExtra && !this.stemsCache) this.renderStemsCache(theme);
+  drawExtra(ctx, flower, theme, timestamp, windAmp) {
+    const bloom =
+      this.reduced || !flower.bornAt || !timestamp ? 1 : clamp((timestamp - flower.bornAt) / BLOOM_MS, 0, 1);
+    // A burst schedules blooms slightly in the future; draw nothing until then.
+    if (bloom <= 0) return;
+    const pulse = 1 + Math.sin(timestamp / 1300 + flower.ph) * 0.025 * (0.4 + windAmp);
+    ctx.save();
+    ctx.strokeStyle = theme.vine;
+    ctx.globalAlpha = 0.7 * Math.min(1, bloom * 2);
+    ctx.lineWidth = Math.max(0.8, flower.r * 0.06);
+    ctx.beginPath();
+    ctx.moveTo(flower.x, flower.y + flower.stem * 1.7);
+    ctx.quadraticCurveTo(
+      flower.x + flower.stemBend * 12,
+      flower.y + flower.stem * 0.7,
+      flower.x,
+      flower.y + flower.r * 0.25,
+    );
+    ctx.stroke();
+    ctx.restore();
+    this.drawFlower(
+      ctx,
+      flower.x,
+      flower.y,
+      flower.r * pulse,
+      flower.rot,
+      theme,
+      flower.ph,
+      bloom,
+      flower.ci,
+      flower.species,
+    );
   }
 
   drawStem(ctx, vine, theme, local) {
@@ -747,18 +912,6 @@ export class Garden {
       ctx.stroke();
     }
     ctx.restore();
-  }
-
-  renderStemsCache(theme) {
-    if (typeof document === 'undefined') return;
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(this.W * this.dpr));
-    canvas.height = Math.max(1, Math.round(this.H * this.dpr));
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    for (const vine of this.vines) this.drawStem(ctx, vine, theme, 1);
-    this.stemsCache = canvas;
   }
 
   drawLeaves(ctx, vine, theme, local, timestamp, windAmp) {
