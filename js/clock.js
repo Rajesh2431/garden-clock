@@ -30,7 +30,9 @@ export function resetClock() {
 
 export function parseTimeApiDate(value) {
   if (typeof value !== 'string' || !value.trim()) return NaN;
-  const text = value.trim();
+  // timeapi.io sends seven fractional digits; trim to milliseconds, since
+  // stricter Date.parse implementations reject anything longer.
+  const text = value.trim().replace(/(\.\d{3})\d+/, '$1');
   const hasZone = /(?:z|[+-]\d{2}:?\d{2})$/i.test(text);
   return Date.parse(hasZone ? text : `${text}Z`);
 }

@@ -77,6 +77,8 @@ const readSeedParam = () => {
 const savedLoc = store.get(KEYS.loc, null);
 const initialLoc =
   savedLoc && Number.isFinite(savedLoc.lat) && Number.isFinite(savedLoc.lon) ? savedLoc : null;
+const initialZone = initialLoc?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+const initialParts = parts(initialZone, false);
 const regrowOnLoad = params.get('regrow') === '1';
 const urlSeed = regrowOnLoad ? null : readSeedParam();
 const qualityParam = params.get('quality');
@@ -137,7 +139,7 @@ const state = {
   h12: !!store.get(KEYS.h12, false),
   secs: store.get(KEYS.secs, true),
   loc: initialLoc,
-  tz: initialLoc?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+  tz: initialZone,
   kind: 'clear',
   isDay: true,
   wind: 0,
@@ -148,19 +150,15 @@ const state = {
   seed: urlSeed ?? randomSeed(),
   themeKey: null,
   current: getTheme('noir'),
-  hour24: new Date().getHours(),
-  minute24: new Date().getMinutes(),
-  phase: timePhase(new Date().getHours(), new Date().getMinutes()),
-  seasonKey: resolveSeason(
-    'auto',
-    wallDate(initialLoc?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone),
-    initialLoc?.lat ?? 0,
-  ),
+  // Start from the saved city's wall clock, not the browser's, so the first
+  // theme and garden build already match the city's time of day.
+  hour24: initialParts.hour24,
+  minute24: Number(initialParts.mm) || 0,
+  phase: timePhase(initialParts.hour24, Number(initialParts.mm) || 0),
+  seasonKey: resolveSeason('auto', wallDate(initialZone), initialLoc?.lat ?? 0),
   dateKey: '',
   moon: moonInfo(new Date()),
-  constellation: constellationForDate(
-    wallDate(initialLoc?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone),
-  ),
+  constellation: constellationForDate(wallDate(initialZone)),
   growth: 0,
   builtSeason: null,
   hiddenAt: 0,
@@ -551,25 +549,45 @@ function weatherFailure(error) {
   refreshTheme();
 }
 
-async function loadWeather({ force = false } = {}) {
-  if (state.weatherBusy) return;
+// Repeat calls for the same place share one request. A call for a different
+// place (city search, geolocation) supersedes the older request, whose result
+// is then discarded so it cannot overwrite the new city with stale weather.
+let weatherSeq = 0;
+let weatherTask = null;
+
+function loadWeather({ force = false } = {}) {
+  if (weatherTask && weatherTask.loc === state.loc) return weatherTask.promise;
+  const id = ++weatherSeq;
+  const task = { loc: state.loc, promise: null };
+  weatherTask = task;
   state.weatherBusy = true;
-  if (!state.hasWeather) setWeatherLoading();
-  try {
-    if (!state.loc) {
-      const located = await locate();
-      state.loc = located || { ...DEFAULT_LOCATION };
-      store.set(KEYS.loc, state.loc);
-      if (state.loc.timezone) state.tz = state.loc.timezone;
-      updateClock(true);
+  task.promise = (async () => {
+    if (!state.hasWeather) setWeatherLoading();
+    try {
+      let loc = state.loc;
+      if (!loc) {
+        const located = await locate();
+        if (id !== weatherSeq) return;
+        loc = located || { ...DEFAULT_LOCATION };
+        state.loc = loc;
+        task.loc = loc;
+        store.set(KEYS.loc, loc);
+        if (loc.timezone) state.tz = loc.timezone;
+        updateClock(true);
+      }
+      const weather = await fetchWeatherCached(loc.lat, loc.lon, { force });
+      if (id !== weatherSeq) return;
+      updateWeatherUI(weather, loc);
+    } catch (error) {
+      if (id === weatherSeq) weatherFailure(error);
+    } finally {
+      if (weatherTask === task) {
+        weatherTask = null;
+        state.weatherBusy = false;
+      }
     }
-    const weather = await fetchWeatherCached(state.loc.lat, state.loc.lon, { force });
-    updateWeatherUI(weather, state.loc);
-  } catch (error) {
-    weatherFailure(error);
-  } finally {
-    state.weatherBusy = false;
-  }
+  })();
+  return task.promise;
 }
 
 async function syncClock({ manual = false } = {}) {
@@ -945,7 +963,8 @@ function handleKeydown(event) {
   if (isTypingTarget(event.target) || event.metaKey || event.ctrlKey || event.altKey) {
     return;
   }
-  const key = event.key.toLowerCase();
+  // Autofill and some IMEs dispatch keydown events without a `key`.
+  const key = (event.key || '').toLowerCase();
   if (key === 'f') {
     event.preventDefault();
     toggleFullscreen();

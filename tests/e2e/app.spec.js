@@ -307,6 +307,34 @@ test('city search updates the clock, weather and timezone', async ({ page }) => 
   await expect(page.locator('#tz')).toContainText('GMT+9');
 });
 
+test('a slow refresh for the old city never overwrites a newly chosen city', async ({ page }) => {
+  await openApp(page, { geocoding: () => TOKYO_RESULT });
+
+  // Hold the next Chennai refresh until Tokyo has loaded.
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  await page.route('**/api.open-meteo.com/**', async (route) => {
+    const latitude = Number(new URL(route.request().url()).searchParams.get('latitude'));
+    if (latitude < 30) await gate;
+    await route.fulfill({ json: latitude > 30 ? TOKYO_WEATHER : CHENNAI_WEATHER });
+  });
+  const chennaiRefresh = page.waitForRequest((request) => request.url().includes('latitude=13.'));
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await chennaiRefresh;
+
+  await page.locator('#city').fill('Tokyo');
+  await page.locator('#city').press('Enter');
+  await expect(page.locator('#w-temp')).toHaveText('18°C');
+
+  release();
+  await page.waitForTimeout(300);
+  await expect(page.locator('#w-temp')).toHaveText('18°C');
+  await expect(page.locator('#w-desc')).toHaveText('Clear sky · Tokyo');
+  await expect(page.locator('#tz')).toContainText('GMT+9');
+});
+
 test('the Bloom button adds flowers and keeps the same garden', async ({ page }) => {
   await openApp(page, { url: '/?seed=1234&debug=1' });
   const debug = page.locator('#debug');

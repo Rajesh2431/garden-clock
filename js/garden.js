@@ -687,8 +687,10 @@ export class Garden {
       variant: Math.floor(rnd() * 4),
       fromX: x < this.W / 2 ? -24 : this.W + 24,
       fromY: clamp(y + (rnd() - 0.5) * 70, 20, this.H - 20),
-      arriveAt: performance.now() + 1500 + rnd() * 500,
+      startAt: performance.now(),
+      arriveAt: 0,
     };
+    visitor.arriveAt = visitor.startAt + 1500 + rnd() * 500;
     this.butterflies.push(visitor);
     if (this.butterflies.length > 8) {
       const index = this.butterflies.findIndex((item) => item.fromX != null);
@@ -812,7 +814,10 @@ export class Garden {
       const count = Math.max(2, Math.floor(progress * vine.pts.length));
       for (const flower of vine.flowers) {
         if (flower.i >= count) continue;
-        const bloom = clamp((count - flower.i) / 10, 0, 1);
+        // Open over the next ten points, or over whatever is left of the vine,
+        // so a flower near the tip still reaches full size.
+        const span = Math.max(1, Math.min(10, vine.pts.length - flower.i));
+        const bloom = clamp((count - flower.i) / span, 0, 1);
         if (bloom <= 0) continue;
         const [px, py] = vine.pts[flower.i];
         const pulse = 1 + Math.sin(timestamp / 1400 + flower.ph) * 0.03 * (0.45 + windAmp);
@@ -1158,11 +1163,14 @@ export class Garden {
       Math.sin(t * butterfly.speed * 1.9) * windAmp * 4;
     let angle = Math.cos(t * butterfly.speed + butterfly.phase) * 0.35;
     if (butterfly.fromX != null && timestamp < butterfly.arriveAt) {
-      const start = butterfly.arriveAt - 1800;
-      const progress = easeOutCubic(clamp((timestamp - start) / 1800, 0, 1));
+      // Fly in from the edge toward the point on the orbit, so the visitor
+      // starts at the edge and joins its loop without a jump on arrival.
+      const start = butterfly.startAt ?? butterfly.arriveAt - 1800;
+      const span = Math.max(1, butterfly.arriveAt - start);
+      const progress = easeOutCubic(clamp((timestamp - start) / span, 0, 1));
       const fromY = butterfly.fromY ?? butterfly.baseY;
-      const dx = butterfly.baseX - butterfly.fromX;
-      const dy = butterfly.baseY - fromY;
+      const dx = x - butterfly.fromX;
+      const dy = y - fromY;
       x = butterfly.fromX + dx * progress + Math.sin(progress * Math.PI) * 16;
       y = fromY + dy * progress - Math.sin(progress * Math.PI) * 22;
       angle = Math.atan2(dy, dx) * 0.35;

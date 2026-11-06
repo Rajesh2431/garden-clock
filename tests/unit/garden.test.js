@@ -440,3 +440,38 @@ describe('Garden quality tiers', () => {
     expect(garden.quality).toBe('high');
   });
 });
+
+describe('Bloom and flight regressions', () => {
+  it('opens tip flowers to full size once the garden is grown', () => {
+    const garden = buildGarden(42);
+    const blooms = [];
+    garden.drawFlower = (ctx, px, py, radius, rotation, theme, phase, bloom) => blooms.push(bloom);
+    const { context } = fakeCanvas();
+    garden.drawFoliage(context, THEMES.noir, 1, 0, 0);
+    const tipCount = garden.vines.reduce(
+      (total, vine) => total + vine.flowers.filter((flower) => flower.tip).length,
+      0,
+    );
+    expect(tipCount).toBeGreaterThan(0);
+    expect(blooms.length).toBeGreaterThanOrEqual(tipCount);
+    expect(blooms.every((bloom) => bloom === 1)).toBe(true);
+  });
+
+  it('flies a summoned butterfly in from the edge and joins its loop without a jump', () => {
+    const garden = buildGarden(11);
+    const visitor = garden.summonButterfly(600, 400);
+    const positions = [];
+    const { context } = fakeCanvas();
+    context.translate = (x, y) => positions.push([x, y]);
+    const at = (timestamp) => {
+      positions.length = 0;
+      garden.drawButterfly(context, visitor, timestamp, THEMES.noir, 0.2);
+      return positions[0];
+    };
+    const [startX] = at(visitor.startAt);
+    expect(Math.abs(startX - visitor.fromX)).toBeLessThan(1);
+    const [beforeX, beforeY] = at(visitor.arriveAt - 0.5);
+    const [afterX, afterY] = at(visitor.arriveAt + 0.5);
+    expect(Math.hypot(afterX - beforeX, afterY - beforeY)).toBeLessThan(2);
+  });
+});

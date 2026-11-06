@@ -149,7 +149,8 @@ export class FX {
     x.save();
     for (const p of this.particles) {
       p.x += dt * (p.speed + this.wind * 0.55) * p.z;
-      p.y += Math.sin(timestamp / 1100 + p.phase) * 0.22 - dt * 1.3;
+      // The sway is tuned per 60 fps frame; scale by dt so slower tiers match.
+      p.y += Math.sin(timestamp / 1100 + p.phase) * 0.22 * dt * 60 - dt * 1.3;
       if (p.x > W + 10) p.x = -10;
       if (p.y < -10) p.y = H + 10;
       const alpha = 0.2 + 0.45 * Math.abs(Math.sin(timestamp / 1600 + p.phase));
@@ -259,7 +260,7 @@ export class FX {
     x.beginPath();
     for (const p of this.particles) {
       p.y += dt * p.speed * p.z;
-      p.x += Math.sin(timestamp / 1000 + p.phase) * 0.5 + dt * this.lean * 3.2;
+      p.x += Math.sin(timestamp / 1000 + p.phase) * 0.5 * dt * 60 + dt * this.lean * 3.2;
       if (p.y > H + 8) {
         p.y = -8;
         p.x = this.rnd() * W;
