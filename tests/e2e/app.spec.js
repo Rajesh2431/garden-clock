@@ -358,6 +358,25 @@ test('?quality= pins a tier and shows it in the debug overlay', async ({ page })
   await expect(page.locator('#debug')).toContainText('dpr 1');
 });
 
+test('the season overlay is off for Noir and for dark themes on cheaper tiers', async ({ page }) => {
+  const overlay = () =>
+    page.evaluate(() => {
+      const style = getComputedStyle(document.querySelector('#stage'), '::before');
+      return { display: style.display, blend: style.mixBlendMode };
+    });
+
+  await openApp(page, { url: '/?quality=high', storage: { key: 'garden-clock:theme', value: 'noir' } });
+  await expect(page.locator('body')).toHaveAttribute('data-quality', 'high');
+  expect((await overlay()).display).toBe('none');
+
+  await page.locator('#theme').selectOption('neon');
+  expect(await overlay()).toEqual({ display: 'block', blend: 'soft-light' });
+
+  await page.goto('/?quality=medium');
+  await expect(page.locator('body')).toHaveAttribute('data-quality', 'medium');
+  expect((await overlay()).display).toBe('none');
+});
+
 test('regrow shortcut creates a seed and removes the flag', async ({ page }) => {
   await openApp(page, { url: '/?seed=1234&regrow=1' });
 

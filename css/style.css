@@ -92,13 +92,23 @@ body[data-season='winter'] {
   transition: opacity 0.8s ease;
 }
 
-body[data-theme='noir'] #stage::before {
-  opacity: 0;
+/* data-theme lives on <html>. Noir keeps the pure reference look, so the
+   overlay is removed outright instead of composited at zero opacity. */
+html[data-theme='noir'] #stage::before {
+  display: none;
 }
 
 body.light #stage::before {
   mix-blend-mode: normal;
   opacity: 0.5;
+}
+
+/* Soft-light over canvases that redraw every frame forces a full-screen blend
+   each frame. Over a dark theme it is barely visible anyway, so phones,
+   tablets and slow devices skip it. Light themes already blend normally. */
+body[data-quality='medium']:not(.light) #stage::before,
+body[data-quality='low']:not(.light) #stage::before {
+  display: none;
 }
 
 #stage canvas {

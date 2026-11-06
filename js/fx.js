@@ -7,6 +7,12 @@ import { clamp, mulberry32, randomSeed } from './rand.js';
 const QUALITY = { high: 1, medium: 0.6, low: 0.35 };
 const MAX_DPR = { high: 2, medium: 1.5, low: 1 };
 
+// Clouds and fog are drawn at this fraction of the canvas size, then scaled up.
+const HAZE_SCALE = 0.25;
+// Pre-rendered snowflake: a disc of FLAKE_RADIUS with room for its glow.
+const FLAKE_RADIUS = 4;
+const FLAKE_SIZE = 24;
+
 const COUNTS = { clear: 34, cloud: 7, fog: 6, drizzle: 90, rain: 230, storm: 340, snow: 150 };
 
 export class FX {
@@ -162,8 +168,35 @@ export class FX {
     x.restore();
   }
 
-  drawClouds(x, dt, light, fog) {
+  /**
+   * Clouds and fog are soft radial gradients hundreds of pixels wide. Filling
+   * them at full resolution every frame is the most expensive thing this layer
+   * does, so they are drawn into a quarter-resolution buffer and scaled up;
+   * the gradients are smooth enough that the upscale is invisible.
+   */
+  hazeTarget() {
+    if (typeof document === 'undefined') return null;
+    const width = Math.max(1, Math.ceil(this.W * HAZE_SCALE));
+    const height = Math.max(1, Math.ceil(this.H * HAZE_SCALE));
+    if (!this.haze) {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext?.('2d');
+      if (!ctx) return null;
+      this.haze = { canvas, ctx };
+    }
+    const { canvas, ctx } = this.haze;
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    ctx.setTransform(HAZE_SCALE, 0, 0, HAZE_SCALE, 0, 0);
+    return ctx;
+  }
+
+  drawClouds(main, dt, light, fog) {
     const { W, H } = this;
+    const buffer = this.hazeTarget();
+    const x = buffer || main;
     for (const p of this.particles) {
       p.x += dt * (p.speed + this.wind * 0.45) * p.z;
       if (p.x - p.r > W + 80) p.x = -p.r - 80;
@@ -186,6 +219,30 @@ export class FX {
       x.fillStyle = gradient;
       x.fillRect(p.x - p.r, y - p.r, p.r * 2, p.r * 2);
     }
+    if (buffer) main.drawImage(this.haze.canvas, 0, 0, W, H);
+  }
+
+  /** One pre-rendered glowing flake, stamped per particle instead of a blurred path. */
+  flakeSprite(light) {
+    if (typeof document === 'undefined') return null;
+    const key = `${light ? 'light' : 'dark'}:${this.dpr}`;
+    if (this.flake?.key === key) return this.flake;
+    const canvas = document.createElement('canvas');
+    const size = Math.ceil(FLAKE_SIZE * this.dpr);
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext?.('2d');
+    if (!ctx) return null;
+    const scale = size / FLAKE_SIZE;
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.fillStyle = light ? 'rgba(255,255,255,.96)' : 'rgba(255,255,255,.88)';
+    ctx.shadowColor = light ? 'rgba(70, 110, 155, .5)' : 'rgba(160, 190, 230, .35)';
+    ctx.shadowBlur = 4;
+    ctx.beginPath();
+    ctx.arc(FLAKE_SIZE / 2, FLAKE_SIZE / 2, FLAKE_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    this.flake = { key, canvas };
+    return this.flake;
   }
 
   drawRain(x, dt, light) {
@@ -251,12 +308,11 @@ export class FX {
 
   drawSnow(x, dt, timestamp, light) {
     const { W, H } = this;
+    // The glow only shows on the high tier; a blurred shadow on a path of a
+    // few hundred circles is costly, so high stamps a pre-rendered flake.
+    const sprite = this.lowPower ? null : this.flakeSprite(light);
     x.save();
     x.fillStyle = light ? 'rgba(255,255,255,.96)' : 'rgba(255,255,255,.88)';
-    if (!this.lowPower) {
-      x.shadowColor = light ? 'rgba(70, 110, 155, .5)' : 'rgba(160, 190, 230, .35)';
-      x.shadowBlur = 4;
-    }
     x.beginPath();
     for (const p of this.particles) {
       p.y += dt * p.speed * p.z;
@@ -267,10 +323,16 @@ export class FX {
       }
       if (p.x > W + 8) p.x = -8;
       if (p.x < -8) p.x = W + 8;
-      x.moveTo(p.x + p.r * p.z, p.y);
-      x.arc(p.x, p.y, p.r * p.z, 0, Math.PI * 2);
+      const r = p.r * p.z;
+      if (sprite) {
+        const half = (r * FLAKE_SIZE) / (FLAKE_RADIUS * 2);
+        x.drawImage(sprite.canvas, p.x - half, p.y - half, half * 2, half * 2);
+      } else {
+        x.moveTo(p.x + r, p.y);
+        x.arc(p.x, p.y, r, 0, Math.PI * 2);
+      }
     }
-    x.fill();
+    if (!sprite) x.fill();
     x.restore();
   }
 }

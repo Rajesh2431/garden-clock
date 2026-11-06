@@ -184,3 +184,70 @@ describe('FX resize', () => {
     expect(fx.dpr).toBeLessThanOrEqual(2);
   });
 });
+
+describe('Offscreen buffers', () => {
+  function recordingFx(kind, options = {}) {
+    const { canvas, context } = fakeCanvas();
+    const calls = [];
+    for (const name of ['fillRect', 'drawImage', 'arc', 'fill']) {
+      context[name] = (...args) => calls.push([name, ...args]);
+    }
+    const fx = new FX(canvas, { seed: 7, ...options });
+    fx.resize();
+    fx.set(kind, true, 10, THEMES.noir);
+    return { fx, calls };
+  }
+
+  function withCanvasFactory(factory, run) {
+    const original = document.createElement.bind(document);
+    document.createElement = (tag) => (tag === 'canvas' ? factory() : original(tag));
+    try {
+      run();
+    } finally {
+      document.createElement = original;
+    }
+  }
+
+  it('draws fog into a quarter-resolution buffer and scales it up once', () => {
+    const buffer = fakeCanvas().canvas;
+    withCanvasFactory(
+      () => buffer,
+      () => {
+        const { fx, calls } = recordingFx('fog');
+        fx.draw(1 / 60, 1000, THEMES.noir);
+        expect(buffer.width).toBe(Math.ceil(fx.W / 4));
+        expect(calls.filter(([name]) => name === 'fillRect')).toHaveLength(0);
+        expect(calls.filter(([name, source]) => name === 'drawImage' && source === buffer)).toHaveLength(1);
+      },
+    );
+  });
+
+  it('falls back to drawing fog directly when offscreen canvases are unavailable', () => {
+    withCanvasFactory(
+      () => ({ getContext: () => null }),
+      () => {
+        const { fx, calls } = recordingFx('fog');
+        fx.draw(1 / 60, 1000, THEMES.noir);
+        expect(calls.filter(([name]) => name === 'fillRect').length).toBe(fx.particles.length);
+      },
+    );
+  });
+
+  it('stamps a pre-rendered flake on the high tier and a plain path elsewhere', () => {
+    const sprite = fakeCanvas().canvas;
+    withCanvasFactory(
+      () => sprite,
+      () => {
+        const high = recordingFx('snow', { quality: 'high' });
+        high.fx.draw(1 / 60, 1000, THEMES.glass);
+        const stamps = high.calls.filter(([name, source]) => name === 'drawImage' && source === sprite);
+        expect(stamps).toHaveLength(high.fx.particles.length);
+
+        const medium = recordingFx('snow', { quality: 'medium' });
+        medium.fx.draw(1 / 60, 1000, THEMES.glass);
+        expect(medium.calls.some(([name]) => name === 'drawImage')).toBe(false);
+        expect(medium.calls.filter(([name]) => name === 'arc')).toHaveLength(medium.fx.particles.length);
+      },
+    );
+  });
+});

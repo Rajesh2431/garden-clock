@@ -430,6 +430,7 @@ function bloomMore() {
 function applyQuality(tier, { remember = false } = {}) {
   if (!isTier(tier) || tier === state.quality) return;
   state.quality = tier;
+  document.body.dataset.quality = tier;
   garden.setQuality(tier);
   fx.setQuality(tier);
   sky.setQuality(tier);
@@ -1103,6 +1104,7 @@ function initAnalytics() {
 }
 
 function init() {
+  document.body.dataset.quality = state.quality;
   initAnalytics();
   initMonitoring();
   buildThemeOptions();
